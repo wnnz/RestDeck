@@ -322,7 +322,7 @@ function createRequest() {
   const collection = activeCollection.value
   if (!collection) return
   activeRequest.value = new domain.Request({
-    id: '',
+    id: crypto.randomUUID(),
     collectionId: collection.id,
     parentId: '',
     name: t.value.requestName,
@@ -374,12 +374,16 @@ async function deleteActiveRequest() {
 
 async function sendActiveRequest() {
   if (!activeRequest.value) return
+  const requestToSend = cloneRequest(activeRequest.value)
+  if (!requestToSend.id) requestToSend.id = crypto.randomUUID()
+  activeRequest.value = cloneRequest(requestToSend)
   busy.value = true
   response.value = null
   try {
-    const savedState = await SaveRequest(activeRequest.value)
+    statusMessage.value = t.value.sendingRequest
+    const savedState = await SaveRequest(requestToSend)
     setState(savedState)
-    const result = await SendRequest(activeRequest.value, activeEnvironment.value?.id ?? '', globalsDraft.value)
+    const result = await SendRequest(requestToSend, activeEnvironment.value?.id ?? '', globalsDraft.value)
     response.value = result
     if (result.contentType && result.body) {
       result.body = await FormatBody(result.contentType, result.body)
@@ -722,10 +726,10 @@ function closeWindow() {
           :methods="methods"
           :auth-types="authTypes"
           :body-modes="bodyModes"
+          :send-request-action="sendActiveRequest"
           @save-request="saveActiveRequest"
           @delete-request="deleteActiveRequest"
           @export-collection="exportCollection"
-          @send-request="sendActiveRequest"
           @create-request="createRequest"
           @add-param="addParam"
           @add-header="addHeader"

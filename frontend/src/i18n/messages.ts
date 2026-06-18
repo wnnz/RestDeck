@@ -110,7 +110,9 @@ export const messages = {
     activeEnvironment: '当前环境',
     pretty: '美化',
     raw: '原始',
-    preview: '预览'
+    preview: '预览',
+    formatJSON: '格式化 JSON',
+    sendingRequest: '正在发送请求...'
   },
   'en-US': {
     home: 'Home',
@@ -223,7 +225,9 @@ export const messages = {
     activeEnvironment: 'Active environment',
     pretty: 'Pretty',
     raw: 'Raw',
-    preview: 'Preview'
+    preview: 'Preview',
+    formatJSON: 'Format JSON',
+    sendingRequest: 'Sending request...'
   }
 }
 

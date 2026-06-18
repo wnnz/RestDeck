@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { CheckCircle2, Clock3, Download, FileJson2, Loader2, Plus, Save, Send, Trash2, XCircle } from 'lucide-vue-next'
+import { CheckCircle2, Clock3, Download, FileJson2, Loader2, Plus, Save, Send, Trash2, Wand2, XCircle } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
+import JsonBodyEditor from './JsonBodyEditor.vue'
 import type { Translation } from '../i18n/messages'
 import type { JsonToken, RequestTab, ResponseTab, ResponseView } from '../types'
 import { formatBytes, responseStatusText, statusClass } from '../utils/format'
 
-defineProps<{
+const props = defineProps<{
   t: Translation
   activeCollection: domain.Collection | null
   response: domain.Response | null
@@ -17,6 +18,7 @@ defineProps<{
   methods: string[]
   authTypes: Array<{ value: string; label: string }>
   bodyModes: Array<{ value: string; label: string }>
+  sendRequestAction: () => void | Promise<void>
 }>()
 
 const activeRequest = defineModel<domain.Request | null>('activeRequest', { required: true })
@@ -25,16 +27,30 @@ const activeResponseTab = defineModel<ResponseTab>('activeResponseTab', { requir
 const responseView = defineModel<ResponseView>('responseView', { required: true })
 
 const emit = defineEmits<{
-  saveRequest: []
-  deleteRequest: []
-  exportCollection: []
-  sendRequest: []
-  createRequest: []
-  addParam: []
-  addHeader: []
-  removeRow: [target: domain.KeyValue[], index: number]
-  setAuthType: [value: string]
+  'save-request': []
+  'delete-request': []
+  'export-collection': []
+  'create-request': []
+  'add-param': []
+  'add-header': []
+  'remove-row': [target: domain.KeyValue[], index: number]
+  'set-auth-type': [value: string]
 }>()
+
+function sendRequest() {
+  void props.sendRequestAction()
+}
+
+function formatRequestJSON() {
+  if (!activeRequest.value) return
+  const raw = activeRequest.value.body?.trim()
+  if (!raw) return
+  try {
+    activeRequest.value.body = JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    // Keep invalid JSON untouched while the user is still editing.
+  }
+}
 </script>
 
 <template>
@@ -46,14 +62,14 @@ const emit = defineEmits<{
         <input v-model="activeRequest.name" class="title-input" />
       </div>
       <div class="editor-actions">
-        <button class="toolbar-btn" :disabled="busy" @click="emit('saveRequest')">
+        <button class="toolbar-btn" :disabled="busy" @click="emit('save-request')">
           <Save :size="14" />
           {{ t.save }}
         </button>
-        <button class="icon-btn" :disabled="!activeRequest.id || busy" :title="t.requestDeleted" @click="emit('deleteRequest')">
+        <button class="icon-btn" :disabled="!activeRequest.id || busy" :title="t.requestDeleted" @click="emit('delete-request')">
           <Trash2 :size="14" />
         </button>
-        <button class="toolbar-btn" :disabled="!activeCollection" @click="emit('exportCollection')">
+        <button class="toolbar-btn" :disabled="!activeCollection" @click="emit('export-collection')">
           <Download :size="14" />
           {{ t.export }}
         </button>
@@ -65,7 +81,7 @@ const emit = defineEmits<{
         <option v-for="method in methods" :key="method" :value="method">{{ method }}</option>
       </select>
       <input v-model="activeRequest.url" class="url-input" placeholder="https://api.example.com/v1/resource" />
-      <button class="send-btn" :disabled="busy" @click="emit('sendRequest')">
+      <button class="send-btn" :disabled="busy" @click="sendRequest">
         <Loader2 v-if="busy" class="spin" :size="15" />
         <Send v-else :size="15" />
         {{ t.send }}
@@ -94,9 +110,9 @@ const emit = defineEmits<{
               <input v-model="param.key" :placeholder="t.key" />
               <input v-model="param.value" :placeholder="t.value" />
               <input v-model="param.description" :placeholder="t.description" />
-              <button class="ghost-icon" @click="emit('removeRow', activeRequest!.params, index)"><Trash2 :size="13" /></button>
+              <button class="ghost-icon" @click="emit('remove-row', activeRequest!.params, index)"><Trash2 :size="13" /></button>
             </div>
-            <button class="add-row" @click="emit('addParam')"><Plus :size="13" /> {{ t.addParam }}</button>
+            <button class="add-row" @click="emit('add-param')"><Plus :size="13" /> {{ t.addParam }}</button>
           </div>
 
           <div v-else-if="activeRequestTab === 'headers'" class="kv-table">
@@ -106,15 +122,15 @@ const emit = defineEmits<{
               <input v-model="header.key" :placeholder="t.headers" />
               <input v-model="header.value" :placeholder="t.value" />
               <input v-model="header.description" :placeholder="t.description" />
-              <button class="ghost-icon" @click="emit('removeRow', activeRequest!.headers, index)"><Trash2 :size="13" /></button>
+              <button class="ghost-icon" @click="emit('remove-row', activeRequest!.headers, index)"><Trash2 :size="13" /></button>
             </div>
-            <button class="add-row" @click="emit('addHeader')"><Plus :size="13" /> {{ t.addHeader }}</button>
+            <button class="add-row" @click="emit('add-header')"><Plus :size="13" /> {{ t.addHeader }}</button>
           </div>
 
           <div v-else-if="activeRequestTab === 'auth'" class="auth-grid">
             <label>
               <span>{{ t.type }}</span>
-              <select :value="activeRequest.auth?.type ?? 'none'" @change="emit('setAuthType', ($event.target as HTMLSelectElement).value)">
+              <select :value="activeRequest.auth?.type ?? 'none'" @change="emit('set-auth-type', ($event.target as HTMLSelectElement).value)">
                 <option v-for="item in authTypes" :key="item.value" :value="item.value">{{ item.label }}</option>
               </select>
             </label>
@@ -143,10 +159,17 @@ const emit = defineEmits<{
           </div>
 
           <div v-else-if="activeRequestTab === 'body'" class="body-editor">
-            <select v-model="activeRequest.bodyMode" class="field compact">
-              <option v-for="mode in bodyModes" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
-            </select>
-            <textarea v-if="activeRequest.bodyMode !== 'none'" v-model="activeRequest.body" spellcheck="false" placeholder='{"hello": "world"}'></textarea>
+            <div class="body-toolbar">
+              <select v-model="activeRequest.bodyMode" class="field compact">
+                <option v-for="mode in bodyModes" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
+              </select>
+              <button v-if="activeRequest.bodyMode === 'json'" class="toolbar-btn" type="button" @click="formatRequestJSON">
+                <Wand2 :size="14" />
+                {{ t.formatJSON }}
+              </button>
+            </div>
+            <JsonBodyEditor v-if="activeRequest.bodyMode === 'json'" v-model="activeRequest.body" />
+            <textarea v-else-if="activeRequest.bodyMode !== 'none'" v-model="activeRequest.body" spellcheck="false" placeholder='{"hello": "world"}'></textarea>
             <div v-else class="empty-panel">{{ t.noBody }}</div>
           </div>
 
@@ -216,6 +239,6 @@ const emit = defineEmits<{
   <div v-else class="blank-state">
     <FileJson2 :size="28" />
     <span>{{ t.createOrSelect }}</span>
-    <button class="send-btn" @click="emit('createRequest')"><Plus :size="15" /> New request</button>
+    <button class="send-btn" @click="emit('create-request')"><Plus :size="15" /> New request</button>
   </div>
 </template>
