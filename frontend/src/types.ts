@@ -1,0 +1,8 @@
+export type NavKey = 'collections' | 'environments' | 'history' | 'runner' | 'realtime' | 'settings'
+export type RequestTab = 'params' | 'auth' | 'headers' | 'body' | 'pre' | 'tests' | 'settings'
+export type ResponseTab = 'body' | 'headers' | 'cookies' | 'tests'
+export type ResponseView = 'pretty' | 'raw' | 'preview'
+export type ActiveModal = 'postman' | 'fetch' | 'curl' | 'export' | null
+export type Language = 'zh-CN' | 'en-US'
+export type JsonTokenType = 'plain' | 'key' | 'string' | 'number' | 'boolean' | 'null' | 'punctuation'
+export type JsonToken = { type: JsonTokenType; text: string }
