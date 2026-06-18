@@ -590,7 +590,10 @@ button {
   background: #f8f9fb;
 }
 
-.collection-picker-wrap,
+.collection-picker-wrap {
+  min-width: 0;
+}
+
 .menu-wrap {
   position: relative;
   min-width: 0;
@@ -626,11 +629,12 @@ button {
 .collection-dropdown {
   position: absolute;
   top: 34px;
-  left: 0;
+  right: 8px;
+  left: 8px;
   z-index: 8;
   display: flex;
   flex-direction: column;
-  width: min(300px, calc(100vw - 110px));
+  width: auto;
   max-height: 360px;
   border: 1px solid #d8dde5;
   border-radius: 6px;
@@ -670,6 +674,15 @@ button {
   color: #1f2933;
   text-align: left;
   cursor: pointer;
+}
+
+.collection-option .ghost-icon {
+  border-color: transparent;
+  background: transparent;
+}
+
+.collection-option .ghost-icon:hover {
+  background: rgba(15, 23, 42, 0.06);
 }
 
 .collection-rename-input {

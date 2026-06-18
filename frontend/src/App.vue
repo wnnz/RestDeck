@@ -171,7 +171,6 @@ const messages = {
     encryptedNote: '请求认证和环境密钥会在本地加密保存。',
     noAuth: '此请求不会添加认证头。',
     activeEnvironment: '当前环境',
-    online: '在线',
     pretty: '美化',
     raw: '原始',
     preview: '预览'
@@ -285,7 +284,6 @@ const messages = {
     encryptedNote: 'Sensitive request auth and secret environment values are encrypted locally.',
     noAuth: 'This request does not add authorization headers.',
     activeEnvironment: 'Active environment',
-    online: 'Online',
     pretty: 'Pretty',
     raw: 'Raw',
     preview: 'Preview'
@@ -1501,7 +1499,6 @@ function tokenizeJSON(raw: string): JsonToken[] {
     </main>
 
     <footer class="statusbar">
-      <span><Activity :size="13" /> {{ t.online }}</span>
       <span>{{ statusMessage }}</span>
     </footer>
   </div>
