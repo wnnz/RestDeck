@@ -27,6 +27,21 @@ go.work.sum
 # env file
 .env
 
+# Wails / frontend
+build/bin/
+frontend/node_modules/
+frontend/dist/assets/
+frontend/dist/index.html
+frontend/.vite/
+frontend/coverage/
+frontend/.vitest/
+
+# Local app data
+*.db
+*.db-shm
+*.db-wal
+secret.key
+
 # Editor/IDE
 # .idea/
 # .vscode/
