@@ -52,3 +52,33 @@ func TestStorePersistsWorkspaceState(t *testing.T) {
 		t.Fatalf("history length = %d", len(state.History))
 	}
 }
+
+func TestStoreRenamesCollection(t *testing.T) {
+	s, err := OpenInMemory(t.Context())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	collection := domain.Collection{ID: "c1", Name: "Before", Description: "old", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := s.SaveCollection(t.Context(), collection); err != nil {
+		t.Fatalf("save collection: %v", err)
+	}
+
+	collection.Name = "After"
+	collection.Description = "new"
+	if err := s.SaveCollection(t.Context(), collection); err != nil {
+		t.Fatalf("rename collection: %v", err)
+	}
+
+	state, err := s.State(t.Context())
+	if err != nil {
+		t.Fatalf("state: %v", err)
+	}
+	if len(state.Collections) != 1 {
+		t.Fatalf("collections length = %d", len(state.Collections))
+	}
+	if state.Collections[0].Name != "After" || state.Collections[0].Description != "new" {
+		t.Fatalf("collection was not renamed: %#v", state.Collections[0])
+	}
+}

@@ -13,9 +13,13 @@ export function FormatBody(arg1:string,arg2:string):Promise<string>;
 
 export function GetState():Promise<domain.WorkspaceState>;
 
+export function ImportFetchRequest(arg1:string,arg2:string):Promise<domain.WorkspaceState>;
+
 export function ImportPostmanCollection(arg1:string):Promise<domain.WorkspaceState>;
 
 export function RunCollection(arg1:string,arg2:string,arg3:number):Promise<domain.RunnerResult>;
+
+export function SaveCollection(arg1:domain.Collection):Promise<domain.WorkspaceState>;
 
 export function SaveEnvironment(arg1:domain.Environment):Promise<domain.WorkspaceState>;
 

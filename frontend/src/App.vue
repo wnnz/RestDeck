@@ -3,12 +3,9 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   Activity,
   CheckCircle2,
-  ChevronDown,
   Clock3,
-  Code2,
   Database,
   Download,
-  Eye,
   FileJson2,
   Globe2,
   Home,
@@ -25,7 +22,6 @@ import {
   Settings,
   Trash2,
   Radio,
-  Variable,
   XCircle
 } from 'lucide-vue-next'
 import {
@@ -34,8 +30,10 @@ import {
   ExportPostmanCollection,
   FormatBody,
   GetState,
+  ImportFetchRequest,
   ImportPostmanCollection,
   RunCollection,
+  SaveCollection,
   SaveEnvironment,
   SaveGlobals,
   SaveRequest,
@@ -50,13 +48,15 @@ type NavKey = 'collections' | 'environments' | 'history' | 'runner' | 'realtime'
 type RequestTab = 'params' | 'auth' | 'headers' | 'body' | 'pre' | 'tests' | 'settings'
 type ResponseTab = 'body' | 'headers' | 'cookies' | 'tests'
 type ResponseView = 'pretty' | 'raw' | 'preview'
+type ImportMode = 'postman' | 'fetch'
 type Language = 'zh-CN' | 'en-US'
+type JsonTokenType = 'plain' | 'key' | 'string' | 'number' | 'boolean' | 'null' | 'punctuation'
+type JsonToken = { type: JsonTokenType; text: string }
 
 const messages = {
   'zh-CN': {
     home: '主页',
-    localWorkspace: '本地工作区',
-    workspace: 'RestDeck 本地工作区',
+    workspace: 'RestDeck',
     workspaceLoaded: '工作区已加载',
     new: '新建',
     import: '导入',
@@ -103,13 +103,20 @@ const messages = {
     passed: '通过',
     failed: '失败',
     maxEvents: '最大事件数',
-    importCollection: '导入 Postman 集合',
+    collectionName: '集合名称',
+    importCollection: '导入请求',
+    importPostmanCollection: '导入 Postman 集合',
+    importFetchRequest: '导入 Fetch 请求',
+    postmanJSON: 'Postman JSON',
+    fetchSnippet: 'Fetch',
+    collectionSaved: '集合已保存',
     exportedCollection: '导出的集合',
     requestName: '未命名请求',
     requestSaved: '请求已保存',
     requestDeleted: '请求已删除',
     collectionCreated: '集合已创建',
     collectionImported: 'Postman 集合已导入',
+    fetchImported: 'Fetch 请求已导入',
     collectionExported: '集合已导出',
     environmentSaved: '环境已保存',
     environmentSelected: '环境已切换',
@@ -150,8 +157,7 @@ const messages = {
   },
   'en-US': {
     home: 'Home',
-    localWorkspace: 'Local workspace',
-    workspace: 'RestDeck local workspace',
+    workspace: 'RestDeck',
     workspaceLoaded: 'Workspace loaded',
     new: 'New',
     import: 'Import',
@@ -198,13 +204,20 @@ const messages = {
     passed: 'Passed',
     failed: 'Failed',
     maxEvents: 'Max events',
-    importCollection: 'Import Postman Collection',
+    collectionName: 'Collection name',
+    importCollection: 'Import request',
+    importPostmanCollection: 'Import Postman Collection',
+    importFetchRequest: 'Import Fetch Request',
+    postmanJSON: 'Postman JSON',
+    fetchSnippet: 'Fetch',
+    collectionSaved: 'Collection saved',
     exportedCollection: 'Exported Collection',
     requestName: 'Untitled Request',
     requestSaved: 'Request saved',
     requestDeleted: 'Request deleted',
     collectionCreated: 'Collection created',
     collectionImported: 'Postman collection imported',
+    fetchImported: 'Fetch request imported',
     collectionExported: 'Collection exported',
     environmentSaved: 'Environment saved',
     environmentSelected: 'Environment selected',
@@ -278,6 +291,7 @@ const runnerBusy = ref(false)
 const realtimeBusy = ref(false)
 const statusMessage = ref('')
 const importText = ref('')
+const importMode = ref<ImportMode>('postman')
 const exportText = ref('')
 const runnerResult = ref<domain.RunnerResult | null>(null)
 const wsDraft = reactive({
@@ -301,6 +315,7 @@ const envDraft = reactive({
   variables: [] as domain.KeyValue[]
 })
 const globalsDraft = ref<domain.KeyValue[]>([])
+const collectionDraft = reactive({ name: '' })
 const settingsDraft = reactive({ language: 'zh-CN', theme: 'light' })
 const t = computed(() => messages[language.value])
 const navItems = computed(() => [
@@ -341,6 +356,13 @@ const prettyResponseBody = computed(() => {
   }
 })
 
+const highlightedResponseBody = computed<JsonToken[]>(() => {
+  if (responseView.value !== 'pretty') {
+    return [{ type: 'plain', text: prettyResponseBody.value }]
+  }
+  return tokenizeJSON(prettyResponseBody.value)
+})
+
 const requestTabs = computed(() => [
   { key: 'params' as RequestTab, label: t.value.params, count: activeRequest.value?.params?.filter((item) => item.enabled && item.key).length ?? 0 },
   { key: 'auth' as RequestTab, label: t.value.auth, count: authBadgeCount(activeRequest.value) },
@@ -374,6 +396,10 @@ watch(activeEnvironment, (env) => {
   envDraft.id = env.id
   envDraft.name = env.name
   envDraft.variables = cloneKeyValues(env.variables ?? [])
+}, { immediate: true })
+
+watch(activeCollection, (collection) => {
+  collectionDraft.name = collection?.name ?? ''
 }, { immediate: true })
 
 watch(state, (next) => {
@@ -416,6 +442,26 @@ async function createCollection() {
   setState(next)
   activeCollectionId.value = next.collections[next.collections.length - 1]?.id ?? activeCollectionId.value
   statusMessage.value = t.value.collectionCreated
+}
+
+async function saveActiveCollection() {
+  const collection = activeCollection.value
+  if (!collection) return
+  const id = collection.id
+  busy.value = true
+  try {
+    const next = await SaveCollection(new domain.Collection({
+      ...collection,
+      name: collectionDraft.name.trim() || collection.name
+    }))
+    setState(next)
+    activeCollectionId.value = id
+    statusMessage.value = t.value.collectionSaved
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
 }
 
 function createRequest() {
@@ -497,10 +543,19 @@ async function importCollection() {
   if (!importText.value.trim()) return
   busy.value = true
   try {
-    const next = await ImportPostmanCollection(importText.value)
+    const previousRequestIds = new Set(activeCollection.value?.requests?.map((request) => request.id) ?? [])
+    const collectionID = activeCollection.value?.id ?? ''
+    const next = importMode.value === 'fetch'
+      ? await ImportFetchRequest(importText.value, collectionID)
+      : await ImportPostmanCollection(importText.value)
     setState(next)
+    if (importMode.value === 'fetch') {
+      const imported = activeCollection.value?.requests?.find((request) => !previousRequestIds.has(request.id))
+      if (imported) selectRequest(imported)
+      activeRequestTab.value = 'headers'
+    }
     importText.value = ''
-    statusMessage.value = t.value.collectionImported
+    statusMessage.value = importMode.value === 'fetch' ? t.value.fetchImported : t.value.collectionImported
   } catch (error) {
     statusMessage.value = formatError(error)
   } finally {
@@ -509,7 +564,22 @@ async function importCollection() {
 }
 
 function openImportDrawer() {
+  importMode.value = 'postman'
   importText.value = JSON.stringify({ info: { name: 'Imported' }, item: [] }, null, 2)
+}
+
+function setImportMode(mode: ImportMode) {
+  importMode.value = mode
+  if (mode === 'postman') {
+    importText.value = JSON.stringify({ info: { name: 'Imported' }, item: [] }, null, 2)
+    return
+  }
+  importText.value = `fetch("https://api.example.com/v1/resource", {
+  "headers": {
+    "accept": "application/json"
+  },
+  "method": "GET"
+});`
 }
 
 async function exportCollection() {
@@ -663,6 +733,36 @@ function statusClass(code?: number) {
   if (code >= 400) return 'text-red-600'
   return 'text-zinc-600'
 }
+
+function responseStatusText(item: domain.Response) {
+  return item.status || String(item.statusCode || '')
+}
+
+function tokenizeJSON(raw: string): JsonToken[] {
+  const tokens: JsonToken[] = []
+  const pattern = /("(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(?=\s*:))|("(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false)\b|\bnull\b|([{}[\],:])/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(raw)) !== null) {
+    if (match.index > lastIndex) {
+      tokens.push({ type: 'plain', text: raw.slice(lastIndex, match.index) })
+    }
+    const text = match[0]
+    let type: JsonTokenType = 'plain'
+    if (match[1]) type = 'key'
+    else if (match[2]) type = 'string'
+    else if (match[3]) type = 'number'
+    else if (match[4]) type = 'boolean'
+    else if (text === 'null') type = 'null'
+    else if (match[5]) type = 'punctuation'
+    tokens.push({ type, text })
+    lastIndex = pattern.lastIndex
+  }
+  if (lastIndex < raw.length) {
+    tokens.push({ type: 'plain', text: raw.slice(lastIndex) })
+  }
+  return tokens
+}
 </script>
 
 <template>
@@ -672,10 +772,6 @@ function statusClass(code?: number) {
       <button class="top-link" @click="activeNav = 'collections'">
         <Home :size="14" />
         {{ t.home }}
-      </button>
-      <button class="top-link" @click="activeNav = 'settings'">
-        {{ t.localWorkspace }}
-        <ChevronDown :size="13" />
       </button>
       <div class="top-search">
         <Search :size="14" />
@@ -721,6 +817,15 @@ function statusClass(code?: number) {
           <select v-model="activeCollectionId" class="field">
             <option v-for="collection in state?.collections ?? []" :key="collection.id" :value="collection.id">{{ collection.name }}</option>
           </select>
+          <div v-if="activeCollection" class="collection-editor">
+            <span>{{ t.collectionName }}</span>
+            <div class="collection-edit-row">
+              <input v-model="collectionDraft.name" :placeholder="t.collectionName" @keydown.enter="saveActiveCollection" />
+              <button class="icon-btn" :disabled="busy || !collectionDraft.name.trim()" :title="t.save" @click="saveActiveCollection">
+                <Save :size="14" />
+              </button>
+            </div>
+          </div>
           <div class="request-list">
             <button
               v-for="request in filteredRequests"
@@ -914,7 +1019,7 @@ function statusClass(code?: number) {
             <section class="response-editor">
               <div class="response-meta">
                 <strong>{{ t.response }}</strong>
-                <span v-if="response" :class="statusClass(response.statusCode)">{{ response.statusCode }} {{ response.status }}</span>
+                <span v-if="response" :class="statusClass(response.statusCode)">{{ responseStatusText(response) }}</span>
                 <span v-if="response"><Clock3 :size="13" /> {{ response.durationMs }} ms</span>
                 <span v-if="response">{{ formatBytes(response.sizeBytes) }}</span>
               </div>
@@ -936,6 +1041,7 @@ function statusClass(code?: number) {
                     <span class="pill">JSON</span>
                   </div>
                   <iframe v-if="responseView === 'preview'" :srcdoc="response.body" />
+                  <pre v-else-if="responseView === 'pretty'" class="json-highlight"><span v-for="(token, index) in highlightedResponseBody" :key="index" :class="`json-${token.type}`">{{ token.text }}</span></pre>
                   <pre v-else>{{ prettyResponseBody }}</pre>
                 </template>
                 <template v-else-if="activeResponseTab === 'headers'">
@@ -1105,11 +1211,19 @@ function statusClass(code?: number) {
 
         <section v-if="importText" class="drawer">
           <div class="drawer-title">
-            <strong>{{ t.importCollection }}</strong>
+            <strong>{{ importMode === 'fetch' ? t.importFetchRequest : t.importPostmanCollection }}</strong>
             <button class="icon-btn" @click="importText = ''"><XCircle :size="14" /></button>
           </div>
+          <div class="segmented">
+            <button :class="{ active: importMode === 'postman' }" @click="setImportMode('postman')">{{ t.postmanJSON }}</button>
+            <button :class="{ active: importMode === 'fetch' }" @click="setImportMode('fetch')">{{ t.fetchSnippet }}</button>
+          </div>
           <textarea v-model="importText" spellcheck="false"></textarea>
-          <button class="send-btn" @click="importCollection"><Import :size="15" /> Import JSON</button>
+          <button class="send-btn" :disabled="busy" @click="importCollection">
+            <Loader2 v-if="busy" class="spin" :size="15" />
+            <Import v-else :size="15" />
+            {{ importMode === 'fetch' ? t.importFetchRequest : t.importPostmanCollection }}
+          </button>
         </section>
 
         <section v-if="exportText" class="drawer">
@@ -1123,11 +1237,8 @@ function statusClass(code?: number) {
     </main>
 
     <footer class="statusbar">
-      <span><Activity :size="13" /> Online</span>
+      <span><Activity :size="13" /> {{ t.online }}</span>
       <span>{{ statusMessage }}</span>
-      <span class="status-right"><Variable :size="13" /> {{ activeEnvironment?.name ?? 'No environment' }}</span>
-      <span><Code2 :size="13" /> Local only</span>
-      <span><Eye :size="13" /> Honest UI</span>
     </footer>
   </div>
 </template>

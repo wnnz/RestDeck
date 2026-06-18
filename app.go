@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,6 +66,14 @@ func (a *App) CreateCollection(name string) (domain.WorkspaceState, error) {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
+	if err := a.store.SaveCollection(a.ctx, c); err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	return a.GetState()
+}
+
+func (a *App) SaveCollection(c domain.Collection) (domain.WorkspaceState, error) {
+	c.Name = fallback(strings.TrimSpace(c.Name), "Collection")
 	if err := a.store.SaveCollection(a.ctx, c); err != nil {
 		return domain.WorkspaceState{}, err
 	}
@@ -162,6 +171,40 @@ func (a *App) ImportPostmanCollection(raw string) (domain.WorkspaceState, error)
 	return a.GetState()
 }
 
+func (a *App) ImportFetchRequest(rawFetch, collectionID string) (domain.WorkspaceState, error) {
+	state, err := a.store.State(a.ctx)
+	if err != nil {
+		return domain.WorkspaceState{}, err
+	}
+
+	collection, found := findCollection(state.Collections, collectionID)
+	if !found && collectionID == "" && len(state.Collections) > 0 {
+		collection = state.Collections[0]
+		found = true
+	}
+	if !found {
+		now := time.Now()
+		collection = domain.Collection{
+			ID:        uuid.NewString(),
+			Name:      "Imported Requests",
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		if err := a.store.SaveCollection(a.ctx, collection); err != nil {
+			return domain.WorkspaceState{}, err
+		}
+	}
+
+	request, err := reqsvc.ImportFetch(rawFetch, collection.ID, len(collection.Requests))
+	if err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	if err := a.store.SaveRequest(a.ctx, request); err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	return a.GetState()
+}
+
 func (a *App) ExportPostmanCollection(collectionID string) (string, error) {
 	state, err := a.store.State(a.ctx)
 	if err != nil {
@@ -215,6 +258,15 @@ func (a *App) TestSSE(input realtime.SSERequest, environmentID string, globals [
 
 func (a *App) FormatBody(contentType, body string) string {
 	return reqsvc.FormatBody(contentType, body)
+}
+
+func findCollection(collections []domain.Collection, id string) (domain.Collection, bool) {
+	for _, collection := range collections {
+		if collection.ID == id {
+			return collection, true
+		}
+	}
+	return domain.Collection{}, false
 }
 
 func findEnvironmentFromApp(a *App, id string) domain.Environment {

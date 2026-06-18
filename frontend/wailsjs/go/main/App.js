@@ -22,12 +22,20 @@ export function GetState() {
   return window['go']['main']['App']['GetState']();
 }
 
+export function ImportFetchRequest(arg1, arg2) {
+  return window['go']['main']['App']['ImportFetchRequest'](arg1, arg2);
+}
+
 export function ImportPostmanCollection(arg1) {
   return window['go']['main']['App']['ImportPostmanCollection'](arg1);
 }
 
 export function RunCollection(arg1, arg2, arg3) {
   return window['go']['main']['App']['RunCollection'](arg1, arg2, arg3);
+}
+
+export function SaveCollection(arg1) {
+  return window['go']['main']['App']['SaveCollection'](arg1);
 }
 
 export function SaveEnvironment(arg1) {

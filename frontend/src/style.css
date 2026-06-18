@@ -84,7 +84,8 @@ button {
 .toolbar-btn:hover,
 .small-btn:hover,
 .ghost-icon:hover,
-.view-switch button:hover {
+.view-switch button:hover,
+.segmented button:hover {
   background: #f0f2f5;
 }
 
@@ -105,6 +106,7 @@ button {
 .top-search input,
 .url-input,
 .title-input,
+.collection-editor input,
 .field,
 .kv-row input,
 .auth-grid input,
@@ -156,10 +158,11 @@ button {
 }
 
 .rail-button {
-  display: grid;
-  grid-template-rows: 18px 14px;
-  place-items: center;
-  gap: 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   height: 52px;
   border: 0;
   border-left: 2px solid transparent;
@@ -167,14 +170,22 @@ button {
   background: transparent;
   color: #57606f;
   cursor: pointer;
+  line-height: 1;
+}
+
+.rail-button svg {
+  flex: 0 0 17px;
 }
 
 .rail-button span {
+  display: block;
   max-width: 50px;
+  height: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10px;
+  line-height: 12px;
 }
 
 .rail-button.active {
@@ -292,6 +303,7 @@ button {
 
 .title-input:focus,
 .url-input:focus,
+.collection-editor input:focus,
 .field:focus,
 .method-select:focus,
 .env-select:focus,
@@ -531,6 +543,27 @@ button {
   padding: 0 8px;
 }
 
+.collection-editor {
+  display: grid;
+  gap: 5px;
+  padding: 0 10px 8px;
+  color: #526070;
+  font-size: 12px;
+}
+
+.collection-edit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 6px;
+}
+
+.collection-editor input {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+}
+
 .field.compact {
   width: 220px;
   margin: 0;
@@ -603,6 +636,30 @@ pre {
   line-height: 1.55;
   text-align: left;
   white-space: pre-wrap;
+}
+
+.json-highlight .json-key {
+  color: #1d4ed8;
+}
+
+.json-highlight .json-string {
+  color: #047857;
+}
+
+.json-highlight .json-number {
+  color: #b45309;
+}
+
+.json-highlight .json-boolean {
+  color: #7c3aed;
+}
+
+.json-highlight .json-null {
+  color: #6b7280;
+}
+
+.json-highlight .json-punctuation {
+  color: #475569;
 }
 
 iframe {
@@ -831,6 +888,35 @@ iframe {
   border-bottom: 1px solid #e1e5ea;
 }
 
+.segmented {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  height: 28px;
+  margin: 10px 10px 0;
+  padding: 2px;
+  border: 1px solid #d8dde5;
+  border-radius: 5px;
+  background: #f7f8fa;
+}
+
+.segmented button {
+  height: 22px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #526070;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.segmented button.active {
+  background: #fff;
+  color: #1f2933;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
 .drawer textarea {
   margin: 10px;
 }
@@ -937,7 +1023,7 @@ iframe {
 }
 
 .statusbar {
-  gap: 12px;
+  gap: 10px;
   height: 22px;
   padding: 0 10px;
   border-top: 1px solid #e1e5ea;
@@ -951,10 +1037,6 @@ iframe {
   align-items: center;
   gap: 4px;
   min-width: 0;
-}
-
-.status-right {
-  margin-left: auto;
 }
 
 .truncate {
