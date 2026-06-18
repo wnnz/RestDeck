@@ -6,6 +6,10 @@ export function CreateCollection(arg1) {
   return window['go']['main']['App']['CreateCollection'](arg1);
 }
 
+export function DeleteCollection(arg1) {
+  return window['go']['main']['App']['DeleteCollection'](arg1);
+}
+
 export function DeleteRequest(arg1) {
   return window['go']['main']['App']['DeleteRequest'](arg1);
 }
@@ -20,6 +24,10 @@ export function FormatBody(arg1, arg2) {
 
 export function GetState() {
   return window['go']['main']['App']['GetState']();
+}
+
+export function ImportCurlRequest(arg1, arg2) {
+  return window['go']['main']['App']['ImportCurlRequest'](arg1, arg2);
 }
 
 export function ImportFetchRequest(arg1, arg2) {

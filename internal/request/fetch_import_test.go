@@ -103,3 +103,75 @@ func TestImportFetchRejectsNonFetchText(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestImportCurlGET(t *testing.T) {
+	req, err := ImportCurl(`curl 'https://api.example.com/v1/users?page=1' \
+  -H 'accept: application/json' \
+  -H 'x-trace: abc' \
+  --compressed`, "c1", 4)
+	if err != nil {
+		t.Fatalf("import curl: %v", err)
+	}
+
+	if req.CollectionID != "c1" {
+		t.Fatalf("collection id = %q", req.CollectionID)
+	}
+	if req.Method != "GET" {
+		t.Fatalf("method = %q", req.Method)
+	}
+	if req.URL != "https://api.example.com/v1/users?page=1" {
+		t.Fatalf("url = %q", req.URL)
+	}
+	if req.Name != "GET api.example.com/v1/users" {
+		t.Fatalf("name = %q", req.Name)
+	}
+	if req.BodyMode != domain.BodyModeNone {
+		t.Fatalf("body mode = %q", req.BodyMode)
+	}
+	if len(req.Headers) != 2 || req.Headers[0].Key != "accept" || req.Headers[0].Value != "application/json" {
+		t.Fatalf("headers = %#v", req.Headers)
+	}
+	if req.SortOrder != 4 {
+		t.Fatalf("sort order = %d", req.SortOrder)
+	}
+}
+
+func TestImportCurlPOSTJSON(t *testing.T) {
+	req, err := ImportCurl(`curl 'https://api.example.com/v1/users' \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer token' \
+  --data-raw '{"name":"Ada"}'`, "c1", 0)
+	if err != nil {
+		t.Fatalf("import curl: %v", err)
+	}
+
+	if req.Method != "POST" {
+		t.Fatalf("method = %q", req.Method)
+	}
+	if req.BodyMode != domain.BodyModeJSON {
+		t.Fatalf("body mode = %q", req.BodyMode)
+	}
+	if req.Body != `{"name":"Ada"}` {
+		t.Fatalf("body = %q", req.Body)
+	}
+	if req.Auth.Type != domain.AuthTypeNone {
+		t.Fatalf("auth = %#v", req.Auth)
+	}
+	if len(req.Headers) != 2 {
+		t.Fatalf("headers = %#v", req.Headers)
+	}
+	if req.Headers[1].Key != "Authorization" || req.Headers[1].Value != "Bearer token" {
+		t.Fatalf("authorization header was not preserved: %#v", req.Headers)
+	}
+}
+
+func TestImportCurlRejectsNonCurlText(t *testing.T) {
+	_, err := ImportCurl(`fetch("https://example.com")`, "c1", 0)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "curl") {
+		t.Fatalf("error = %v", err)
+	}
+}

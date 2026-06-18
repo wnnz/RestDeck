@@ -359,6 +359,11 @@ func (s *Store) DeleteRequest(ctx context.Context, id string) error {
 	return err
 }
 
+func (s *Store) DeleteCollection(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM collections WHERE id = ?`, id)
+	return err
+}
+
 func (s *Store) SaveEnvironment(ctx context.Context, env domain.Environment) error {
 	if env.ID == "" {
 		env.ID = uuid.NewString()

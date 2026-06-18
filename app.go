@@ -95,6 +95,13 @@ func (a *App) DeleteRequest(id string) (domain.WorkspaceState, error) {
 	return a.GetState()
 }
 
+func (a *App) DeleteCollection(collectionID string) (domain.WorkspaceState, error) {
+	if err := a.store.DeleteCollection(a.ctx, collectionID); err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	return a.GetState()
+}
+
 func (a *App) SaveEnvironment(env domain.Environment) (domain.WorkspaceState, error) {
 	env = a.prepareEnvironmentSecrets(env, true)
 	if err := a.store.SaveEnvironment(a.ctx, env); err != nil {
@@ -172,30 +179,28 @@ func (a *App) ImportPostmanCollection(raw string) (domain.WorkspaceState, error)
 }
 
 func (a *App) ImportFetchRequest(rawFetch, collectionID string) (domain.WorkspaceState, error) {
-	state, err := a.store.State(a.ctx)
+	collection, err := a.ensureImportCollection(collectionID)
 	if err != nil {
 		return domain.WorkspaceState{}, err
 	}
 
-	collection, found := findCollection(state.Collections, collectionID)
-	if !found && collectionID == "" && len(state.Collections) > 0 {
-		collection = state.Collections[0]
-		found = true
+	request, err := reqsvc.ImportFetch(rawFetch, collection.ID, len(collection.Requests))
+	if err != nil {
+		return domain.WorkspaceState{}, err
 	}
-	if !found {
-		now := time.Now()
-		collection = domain.Collection{
-			ID:        uuid.NewString(),
-			Name:      "Imported Requests",
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
-		if err := a.store.SaveCollection(a.ctx, collection); err != nil {
-			return domain.WorkspaceState{}, err
-		}
+	if err := a.store.SaveRequest(a.ctx, request); err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	return a.GetState()
+}
+
+func (a *App) ImportCurlRequest(rawCurl, collectionID string) (domain.WorkspaceState, error) {
+	collection, err := a.ensureImportCollection(collectionID)
+	if err != nil {
+		return domain.WorkspaceState{}, err
 	}
 
-	request, err := reqsvc.ImportFetch(rawFetch, collection.ID, len(collection.Requests))
+	request, err := reqsvc.ImportCurl(rawCurl, collection.ID, len(collection.Requests))
 	if err != nil {
 		return domain.WorkspaceState{}, err
 	}
@@ -258,6 +263,34 @@ func (a *App) TestSSE(input realtime.SSERequest, environmentID string, globals [
 
 func (a *App) FormatBody(contentType, body string) string {
 	return reqsvc.FormatBody(contentType, body)
+}
+
+func (a *App) ensureImportCollection(collectionID string) (domain.Collection, error) {
+	state, err := a.store.State(a.ctx)
+	if err != nil {
+		return domain.Collection{}, err
+	}
+
+	collection, found := findCollection(state.Collections, collectionID)
+	if !found && collectionID == "" && len(state.Collections) > 0 {
+		collection = state.Collections[0]
+		found = true
+	}
+	if found {
+		return collection, nil
+	}
+
+	now := time.Now()
+	collection = domain.Collection{
+		ID:        uuid.NewString(),
+		Name:      "Imported Requests",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := a.store.SaveCollection(a.ctx, collection); err != nil {
+		return domain.Collection{}, err
+	}
+	return collection, nil
 }
 
 func findCollection(collections []domain.Collection, id string) (domain.Collection, bool) {

@@ -5,6 +5,8 @@ import {realtime} from '../models';
 
 export function CreateCollection(arg1:string):Promise<domain.WorkspaceState>;
 
+export function DeleteCollection(arg1:string):Promise<domain.WorkspaceState>;
+
 export function DeleteRequest(arg1:string):Promise<domain.WorkspaceState>;
 
 export function ExportPostmanCollection(arg1:string):Promise<string>;
@@ -12,6 +14,8 @@ export function ExportPostmanCollection(arg1:string):Promise<string>;
 export function FormatBody(arg1:string,arg2:string):Promise<string>;
 
 export function GetState():Promise<domain.WorkspaceState>;
+
+export function ImportCurlRequest(arg1:string,arg2:string):Promise<domain.WorkspaceState>;
 
 export function ImportFetchRequest(arg1:string,arg2:string):Promise<domain.WorkspaceState>;
 

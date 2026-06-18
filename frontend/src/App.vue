@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   Activity,
   CheckCircle2,
   Clock3,
+  CircleAlert,
+  ChevronDown,
   Download,
   FileJson2,
   Globe2,
@@ -14,22 +16,28 @@ import {
   ListTree,
   Loader2,
   MoreHorizontal,
+  Pencil,
   Play,
   Plus,
   Save,
   Search,
   Send,
   Settings,
+  Square,
   Trash2,
   Radio,
+  X,
   XCircle
 } from 'lucide-vue-next'
+import { Quit, WindowMinimise, WindowToggleMaximise } from '../wailsjs/runtime/runtime'
 import {
   CreateCollection,
+  DeleteCollection,
   DeleteRequest,
   ExportPostmanCollection,
   FormatBody,
   GetState,
+  ImportCurlRequest,
   ImportFetchRequest,
   ImportPostmanCollection,
   RunCollection,
@@ -48,7 +56,7 @@ type NavKey = 'collections' | 'environments' | 'history' | 'runner' | 'realtime'
 type RequestTab = 'params' | 'auth' | 'headers' | 'body' | 'pre' | 'tests' | 'settings'
 type ResponseTab = 'body' | 'headers' | 'cookies' | 'tests'
 type ResponseView = 'pretty' | 'raw' | 'preview'
-type ImportMode = 'postman' | 'fetch'
+type ActiveModal = 'postman' | 'fetch' | 'curl' | 'export' | null
 type Language = 'zh-CN' | 'en-US'
 type JsonTokenType = 'plain' | 'key' | 'string' | 'number' | 'boolean' | 'null' | 'punctuation'
 type JsonToken = { type: JsonTokenType; text: string }
@@ -91,7 +99,12 @@ const messages = {
     addHeader: '添加请求头',
     addVariable: '添加变量',
     addGlobal: '添加全局变量',
+    newRequest: '新建请求',
     newCollection: '新建集合',
+    editCollection: '编辑集合',
+    deleteCollection: '删除集合',
+    confirmDeleteCollection: '再次点击删除',
+    collectionDeleted: '集合已删除',
     type: '类型',
     addTo: '添加到',
     username: '用户名',
@@ -108,8 +121,14 @@ const messages = {
     importCollection: '导入请求',
     importPostmanCollection: '导入 Postman 集合',
     importFetchRequest: '导入 Fetch 请求',
+    importCurlRequest: '导入 cURL 请求',
+    importFromFetch: '从 Fetch 导入',
+    importFromCurl: '从 cURL 导入',
+    importFromPostman: '从 Postman 导入',
+    collectionOptions: '集合选项',
     postmanJSON: 'Postman JSON',
     fetchSnippet: 'Fetch',
+    curlSnippet: 'cURL',
     collectionSaved: '集合已保存',
     exportedCollection: '导出的集合',
     requestName: '未命名请求',
@@ -118,6 +137,7 @@ const messages = {
     collectionCreated: '集合已创建',
     collectionImported: 'Postman 集合已导入',
     fetchImported: 'Fetch 请求已导入',
+    curlImported: 'cURL 请求已导入',
     collectionExported: '集合已导出',
     environmentSaved: '环境已保存',
     environmentSelected: '环境已切换',
@@ -193,7 +213,12 @@ const messages = {
     addHeader: 'Add header',
     addVariable: 'Add variable',
     addGlobal: 'Add global',
+    newRequest: 'New request',
     newCollection: 'New collection',
+    editCollection: 'Edit collection',
+    deleteCollection: 'Delete collection',
+    confirmDeleteCollection: 'Click again to delete',
+    collectionDeleted: 'Collection deleted',
     type: 'Type',
     addTo: 'Add to',
     username: 'Username',
@@ -210,8 +235,14 @@ const messages = {
     importCollection: 'Import request',
     importPostmanCollection: 'Import Postman Collection',
     importFetchRequest: 'Import Fetch Request',
+    importCurlRequest: 'Import cURL Request',
+    importFromFetch: 'Import from Fetch',
+    importFromCurl: 'Import from cURL',
+    importFromPostman: 'Import from Postman',
+    collectionOptions: 'Collection options',
     postmanJSON: 'Postman JSON',
     fetchSnippet: 'Fetch',
+    curlSnippet: 'cURL',
     collectionSaved: 'Collection saved',
     exportedCollection: 'Exported Collection',
     requestName: 'Untitled Request',
@@ -220,6 +251,7 @@ const messages = {
     collectionCreated: 'Collection created',
     collectionImported: 'Postman collection imported',
     fetchImported: 'Fetch request imported',
+    curlImported: 'cURL request imported',
     collectionExported: 'Collection exported',
     environmentSaved: 'Environment saved',
     environmentSelected: 'Environment selected',
@@ -292,9 +324,17 @@ const busy = ref(false)
 const runnerBusy = ref(false)
 const realtimeBusy = ref(false)
 const statusMessage = ref('')
-const importText = ref('')
-const importMode = ref<ImportMode>('postman')
-const collectionMenuOpen = ref(false)
+const activeModal = ref<ActiveModal>(null)
+const postmanText = ref('')
+const fetchText = ref('')
+const curlText = ref('')
+const collectionPickerOpen = ref(false)
+const addMenuOpen = ref(false)
+const optionsMenuOpen = ref(false)
+const collectionToolbarRef = ref<HTMLElement | null>(null)
+const editingCollectionId = ref('')
+const editingCollectionName = ref('')
+const pendingDeleteCollectionId = ref('')
 const exportText = ref('')
 const runnerResult = ref<domain.RunnerResult | null>(null)
 const wsDraft = reactive({
@@ -334,6 +374,21 @@ const activeCollection = computed(() => {
   return state.value?.collections?.find((item) => item.id === activeCollectionId.value) ?? state.value?.collections?.[0] ?? null
 })
 
+const activeModalTitle = computed(() => {
+  switch (activeModal.value) {
+    case 'fetch':
+      return t.value.importFetchRequest
+    case 'curl':
+      return t.value.importCurlRequest
+    case 'postman':
+      return t.value.importPostmanCollection
+    case 'export':
+      return t.value.exportedCollection
+    default:
+      return ''
+  }
+})
+
 const activeEnvironment = computed(() => {
   const envs = state.value?.environments ?? []
   return envs.find((item) => item.id === state.value?.activeEnvironmentId) ?? envs.find((item) => item.isActive) ?? envs[0] ?? null
@@ -346,13 +401,6 @@ const filteredRequests = computed(() => {
   return requests.filter((request) => {
     return request.name.toLowerCase().includes(keyword) || request.url.toLowerCase().includes(keyword) || request.method.toLowerCase().includes(keyword)
   })
-})
-
-const collectionNameDirty = computed(() => {
-  const collection = activeCollection.value
-  if (!collection) return false
-  const nextName = collectionDraft.name.trim()
-  return nextName !== '' && nextName !== collection.name
 })
 
 const prettyResponseBody = computed(() => {
@@ -392,7 +440,12 @@ const responseTabs = computed(() => [
 
 onMounted(async () => {
   settingsDraft.language = language.value
+  document.addEventListener('click', handleDocumentClick, true)
   await loadState()
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleDocumentClick, true)
 })
 
 watch(language, (next) => {
@@ -428,15 +481,23 @@ async function loadState() {
 
 function setState(next: domain.WorkspaceState) {
   state.value = next
-  if (!activeCollectionId.value && next.collections?.length) {
-    activeCollectionId.value = next.collections[0].id
+  const collections = next.collections ?? []
+  const activeCollectionExists = collections.some((collection) => collection.id === activeCollectionId.value)
+  if (!activeCollectionId.value || !activeCollectionExists) {
+    activeCollectionId.value = collections[0]?.id ?? ''
   }
+  const collection = collections.find((item) => item.id === activeCollectionId.value)
   if (!activeRequest.value) {
-    const first = next.collections?.find((collection) => collection.id === activeCollectionId.value)?.requests?.[0]
+    const first = collection?.requests?.[0]
     if (first) activeRequest.value = cloneRequest(first)
   } else {
-    const fresh = next.collections?.flatMap((collection) => collection.requests ?? []).find((request) => request.id === activeRequest.value?.id)
-    if (fresh) activeRequest.value = cloneRequest(fresh)
+    const fresh = collection?.requests?.find((request) => request.id === activeRequest.value?.id)
+    if (fresh) {
+      activeRequest.value = cloneRequest(fresh)
+    } else {
+      activeRequest.value = collection?.requests?.[0] ? cloneRequest(collection.requests[0]) : null
+      response.value = null
+    }
   }
 }
 
@@ -474,6 +535,73 @@ async function saveActiveCollection() {
   }
 }
 
+function selectCollection(collection: domain.Collection) {
+  activeCollectionId.value = collection.id
+  activeRequest.value = collection.requests?.[0] ? cloneRequest(collection.requests[0]) : null
+  response.value = null
+  collectionPickerOpen.value = false
+  pendingDeleteCollectionId.value = ''
+}
+
+function startEditingCollection(collection: domain.Collection) {
+  editingCollectionId.value = collection.id
+  editingCollectionName.value = collection.name
+  pendingDeleteCollectionId.value = ''
+}
+
+function cancelEditingCollection() {
+  editingCollectionId.value = ''
+  editingCollectionName.value = ''
+}
+
+async function saveEditingCollection(collection: domain.Collection) {
+  if (editingCollectionId.value !== collection.id) return
+  const nextName = editingCollectionName.value.trim()
+  cancelEditingCollection()
+  if (!nextName || nextName === collection.name) return
+  busy.value = true
+  try {
+    const next = await SaveCollection(new domain.Collection({
+      ...collection,
+      name: nextName
+    }))
+    setState(next)
+    activeCollectionId.value = collection.id
+    statusMessage.value = t.value.collectionSaved
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function deleteCollectionFromPicker(collection: domain.Collection) {
+  if (!collection.id) return
+  const hasItems = (collection.requests?.length ?? 0) > 0 || (collection.folders?.length ?? 0) > 0
+  if (hasItems && pendingDeleteCollectionId.value !== collection.id) {
+    pendingDeleteCollectionId.value = collection.id
+    return
+  }
+
+  busy.value = true
+  try {
+    const next = await DeleteCollection(collection.id)
+    if (activeCollectionId.value === collection.id) {
+      activeCollectionId.value = next.collections?.[0]?.id ?? ''
+      activeRequest.value = next.collections?.[0]?.requests?.[0] ? cloneRequest(next.collections[0].requests[0]) : null
+      response.value = null
+    }
+    setState(next)
+    pendingDeleteCollectionId.value = ''
+    editingCollectionId.value = ''
+    statusMessage.value = t.value.collectionDeleted
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
+}
+
 function createRequest() {
   const collection = activeCollection.value
   if (!collection) return
@@ -495,6 +623,7 @@ function createRequest() {
     sortOrder: collection.requests?.length ?? 0
   })
   response.value = null
+  addMenuOpen.value = false
 }
 
 async function saveActiveRequest() {
@@ -549,23 +678,15 @@ async function sendActiveRequest() {
   }
 }
 
-async function importCollection() {
-  if (!importText.value.trim()) return
+async function importPostmanCollection() {
+  if (!postmanText.value.trim()) return
   busy.value = true
   try {
-    const previousRequestIds = new Set(activeCollection.value?.requests?.map((request) => request.id) ?? [])
-    const collectionID = activeCollection.value?.id ?? ''
-    const next = importMode.value === 'fetch'
-      ? await ImportFetchRequest(importText.value, collectionID)
-      : await ImportPostmanCollection(importText.value)
+    const next = await ImportPostmanCollection(postmanText.value)
     setState(next)
-    if (importMode.value === 'fetch') {
-      const imported = activeCollection.value?.requests?.find((request) => !previousRequestIds.has(request.id))
-      if (imported) selectRequest(imported)
-      activeRequestTab.value = 'headers'
-    }
-    importText.value = ''
-    statusMessage.value = importMode.value === 'fetch' ? t.value.fetchImported : t.value.collectionImported
+    activeModal.value = null
+    postmanText.value = ''
+    statusMessage.value = t.value.collectionImported
   } catch (error) {
     statusMessage.value = formatError(error)
   } finally {
@@ -573,24 +694,77 @@ async function importCollection() {
   }
 }
 
-function openImportDrawer() {
-  collectionMenuOpen.value = false
-  importMode.value = 'postman'
-  importText.value = JSON.stringify({ info: { name: 'Imported' }, item: [] }, null, 2)
+async function importFetchRequest() {
+  if (!fetchText.value.trim()) return
+  busy.value = true
+  try {
+    const previousRequestIds = new Set(activeCollection.value?.requests?.map((request) => request.id) ?? [])
+    const collectionID = activeCollection.value?.id ?? ''
+    const next = await ImportFetchRequest(fetchText.value, collectionID)
+    setState(next)
+    selectLatestImportedRequest(previousRequestIds)
+    activeRequestTab.value = 'headers'
+    activeModal.value = null
+    fetchText.value = ''
+    statusMessage.value = t.value.fetchImported
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
 }
 
-function setImportMode(mode: ImportMode) {
-  importMode.value = mode
-  if (mode === 'postman') {
-    importText.value = JSON.stringify({ info: { name: 'Imported' }, item: [] }, null, 2)
-    return
+async function importCurlRequest() {
+  if (!curlText.value.trim()) return
+  busy.value = true
+  try {
+    const previousRequestIds = new Set(activeCollection.value?.requests?.map((request) => request.id) ?? [])
+    const collectionID = activeCollection.value?.id ?? ''
+    const next = await ImportCurlRequest(curlText.value, collectionID)
+    setState(next)
+    selectLatestImportedRequest(previousRequestIds)
+    activeRequestTab.value = 'headers'
+    activeModal.value = null
+    curlText.value = ''
+    statusMessage.value = t.value.curlImported
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
   }
-  importText.value = `fetch("https://api.example.com/v1/resource", {
+}
+
+function selectLatestImportedRequest(previousRequestIds: Set<string>) {
+  const imported = activeCollection.value?.requests?.find((request) => !previousRequestIds.has(request.id))
+  if (imported) selectRequest(imported)
+}
+
+function openPostmanModal() {
+  closeCollectionMenus()
+  postmanText.value = JSON.stringify({ info: { name: 'Imported' }, item: [] }, null, 2)
+  activeModal.value = 'postman'
+}
+
+function openFetchModal() {
+  closeCollectionMenus()
+  fetchText.value = `fetch("https://api.example.com/v1/resource", {
   "headers": {
     "accept": "application/json"
   },
   "method": "GET"
 });`
+  activeModal.value = 'fetch'
+}
+
+function openCurlModal() {
+  closeCollectionMenus()
+  curlText.value = `curl 'https://api.example.com/v1/resource' \\
+  -H 'accept: application/json'`
+  activeModal.value = 'curl'
+}
+
+function closeModal() {
+  activeModal.value = null
 }
 
 async function exportCollection() {
@@ -598,10 +772,26 @@ async function exportCollection() {
   if (!collection) return
   try {
     exportText.value = await ExportPostmanCollection(collection.id)
+    activeModal.value = 'export'
+    closeCollectionMenus()
     statusMessage.value = t.value.collectionExported
   } catch (error) {
     statusMessage.value = formatError(error)
   }
+}
+
+function closeCollectionMenus() {
+  collectionPickerOpen.value = false
+  addMenuOpen.value = false
+  optionsMenuOpen.value = false
+}
+
+function handleDocumentClick(event: MouseEvent) {
+  if (!collectionPickerOpen.value && !addMenuOpen.value && !optionsMenuOpen.value) return
+  const target = event.target
+  if (target instanceof Node && collectionToolbarRef.value?.contains(target)) return
+  closeCollectionMenus()
+  pendingDeleteCollectionId.value = ''
 }
 
 async function saveEnvironmentDraft() {
@@ -749,6 +939,18 @@ function responseStatusText(item: domain.Response) {
   return item.status || String(item.statusCode || '')
 }
 
+function minimiseWindow() {
+  WindowMinimise()
+}
+
+function toggleWindowMaximise() {
+  WindowToggleMaximise()
+}
+
+function closeWindow() {
+  Quit()
+}
+
 function tokenizeJSON(raw: string): JsonToken[] {
   const tokens: JsonToken[] = []
   const pattern = /("(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(?=\s*:))|("(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false)\b|\bnull\b|([{}[\],:])/g
@@ -775,28 +977,35 @@ function tokenizeJSON(raw: string): JsonToken[] {
   return tokens
 }
 
-async function createCollectionFromMenu() {
-  collectionMenuOpen.value = false
-  await createCollection()
-}
 </script>
 
 <template>
   <div class="app-shell">
-    <header class="topbar">
-      <div class="brand-mark">R</div>
-      <button class="top-link" @click="activeNav = 'collections'">
+    <header class="topbar window-titlebar" @dblclick="toggleWindowMaximise">
+      <div class="window-title">RestDeck</div>
+      <button class="top-link" @dblclick.stop @click="activeNav = 'collections'">
         <Home :size="14" />
         {{ t.home }}
       </button>
-      <div class="top-search">
+      <div class="top-search" @dblclick.stop>
         <Search :size="14" />
         <input v-model="search" :placeholder="t.search" />
       </div>
       <div class="top-spacer" />
-      <select class="env-select" :value="activeEnvironment?.id" @change="setEnvironment(($event.target as HTMLSelectElement).value)">
+      <select class="env-select" :value="activeEnvironment?.id" @dblclick.stop @change="setEnvironment(($event.target as HTMLSelectElement).value)">
         <option v-for="env in state?.environments ?? []" :key="env.id" :value="env.id">{{ env.name }}</option>
       </select>
+      <div class="window-controls" @dblclick.stop>
+        <button type="button" class="window-control" title="Minimize" @click="minimiseWindow">
+          <span class="minimize-mark"></span>
+        </button>
+        <button type="button" class="window-control" title="Maximize" @click="toggleWindowMaximise">
+          <Square :size="11" :stroke-width="1.7" />
+        </button>
+        <button type="button" class="window-control close" title="Close" @click="closeWindow">
+          <X :size="14" :stroke-width="1.7" />
+        </button>
+      </div>
     </header>
 
     <main class="workspace">
@@ -814,47 +1023,96 @@ async function createCollectionFromMenu() {
       </aside>
 
       <aside class="sidebar">
-        <div class="sidebar-title">
-          <span>{{ navItems.find((item) => item.key === activeNav)?.label }}</span>
-          <button v-if="activeNav === 'collections'" class="icon-btn" :title="t.new" @click="createRequest">
-            <Plus :size="15" />
-          </button>
-        </div>
-
         <template v-if="activeNav === 'collections'">
-          <div v-if="activeCollection" class="collection-editor">
-            <div class="collection-combo">
-              <input v-model="collectionDraft.name" :placeholder="t.collectionName" @keydown.enter="saveActiveCollection" />
-              <select v-model="activeCollectionId" :title="t.collections">
-                <option v-for="collection in state?.collections ?? []" :key="collection.id" :value="collection.id">{{ collection.name }}</option>
-              </select>
-            </div>
-            <button v-if="collectionNameDirty" class="icon-btn" :disabled="busy" :title="t.save" @click="saveActiveCollection">
-              <Save :size="14" />
-            </button>
-            <details :open="collectionMenuOpen" class="collection-menu" @toggle="collectionMenuOpen = ($event.target as HTMLDetailsElement).open">
-              <summary :title="t.import"><MoreHorizontal :size="14" /></summary>
-              <div>
-                <button type="button" @click="createCollectionFromMenu">
+          <div ref="collectionToolbarRef" class="collection-toolbar">
+            <div class="collection-picker-wrap">
+              <button class="collection-link" type="button" @click="collectionPickerOpen = !collectionPickerOpen; addMenuOpen = false; optionsMenuOpen = false">
+                <span class="truncate">{{ activeCollection?.name ?? t.collections }}</span>
+                <ChevronDown :size="13" />
+              </button>
+              <div v-if="collectionPickerOpen" class="collection-dropdown">
+                <div class="collection-dropdown-list">
+                  <div
+                    v-for="collection in state?.collections ?? []"
+                    :key="collection.id"
+                    :class="['collection-option', { active: collection.id === activeCollection?.id }]"
+                  >
+                    <input
+                      v-if="editingCollectionId === collection.id"
+                      v-model="editingCollectionName"
+                      class="collection-rename-input"
+                      :placeholder="t.collectionName"
+                      @keydown.enter="saveEditingCollection(collection)"
+                      @keydown.esc="cancelEditingCollection"
+                      @blur="saveEditingCollection(collection)"
+                    />
+                    <button v-else class="collection-option-name" type="button" @click="selectCollection(collection)">
+                      <span class="truncate">{{ collection.name }}</span>
+                    </button>
+                    <button class="ghost-icon" type="button" :title="t.editCollection" @click.stop="startEditingCollection(collection)">
+                      <Pencil :size="13" />
+                    </button>
+                    <button
+                      :class="['ghost-icon', 'danger-icon', { pending: pendingDeleteCollectionId === collection.id }]"
+                      type="button"
+                      :title="pendingDeleteCollectionId === collection.id ? t.confirmDeleteCollection : t.deleteCollection"
+                      @click.stop="deleteCollectionFromPicker(collection)"
+                    >
+                      <CircleAlert v-if="pendingDeleteCollectionId === collection.id" :size="13" />
+                      <X v-else :size="13" />
+                    </button>
+                  </div>
+                </div>
+                <button class="collection-new-option" type="button" @click="createCollection">
                   <Plus :size="14" />
                   {{ t.newCollection }}
                 </button>
-                <button type="button" @click="openImportDrawer">
-                  <Import :size="14" />
-                  {{ t.import }}
-                </button>
               </div>
-            </details>
+            </div>
+
+            <div class="collection-actions">
+              <div class="menu-wrap">
+                <button class="icon-btn" type="button" :title="t.new" @click="addMenuOpen = !addMenuOpen; collectionPickerOpen = false; optionsMenuOpen = false">
+                  <Plus :size="15" />
+                </button>
+                <div v-if="addMenuOpen" class="action-menu">
+                  <button type="button" @click="createRequest">
+                    <Plus :size="14" />
+                    {{ t.newRequest }}
+                  </button>
+                  <button type="button" @click="openFetchModal">
+                    <Import :size="14" />
+                    {{ t.importFromFetch }}
+                  </button>
+                  <button type="button" @click="openCurlModal">
+                    <Import :size="14" />
+                    {{ t.importFromCurl }}
+                  </button>
+                </div>
+              </div>
+              <div class="menu-wrap">
+                <button class="icon-btn" type="button" :title="t.collectionOptions" @click="optionsMenuOpen = !optionsMenuOpen; collectionPickerOpen = false; addMenuOpen = false">
+                  <MoreHorizontal :size="14" />
+                </button>
+                <div v-if="optionsMenuOpen" class="action-menu right">
+                  <button type="button" @click="openPostmanModal">
+                    <Import :size="14" />
+                    {{ t.importFromPostman }}
+                  </button>
+                  <button type="button" :disabled="!activeCollection" @click="exportCollection">
+                    <Download :size="14" />
+                    {{ t.export }}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-          <div v-else class="collection-editor">
-            <button class="small-btn" @click="createCollection">
-              <Plus :size="14" />
-              {{ t.newCollection }}
-            </button>
-            <button class="icon-btn" :title="t.import" @click="openImportDrawer">
-              <Import :size="14" />
-            </button>
-          </div>
+        </template>
+        <div v-else class="sidebar-title">
+          <span>{{ navItems.find((item) => item.key === activeNav)?.label }}</span>
+        </div>
+
+        <template v-if="activeNav === 'collections'">
           <div class="request-list">
             <button
               v-for="request in filteredRequests"
@@ -865,6 +1123,7 @@ async function createCollectionFromMenu() {
               <span :class="['method', request.method.toLowerCase()]">{{ request.method }}</span>
               <span class="truncate">{{ request.name }}</span>
             </button>
+            <div v-if="!activeCollection" class="side-note">{{ t.createOrSelect }}</div>
           </div>
         </template>
 
@@ -1238,30 +1497,6 @@ async function createCollectionFromMenu() {
           </div>
         </template>
 
-        <section v-if="importText" class="drawer">
-          <div class="drawer-title">
-            <strong>{{ importMode === 'fetch' ? t.importFetchRequest : t.importPostmanCollection }}</strong>
-            <button class="icon-btn" @click="importText = ''"><XCircle :size="14" /></button>
-          </div>
-          <div class="segmented">
-            <button :class="{ active: importMode === 'postman' }" @click="setImportMode('postman')">{{ t.postmanJSON }}</button>
-            <button :class="{ active: importMode === 'fetch' }" @click="setImportMode('fetch')">{{ t.fetchSnippet }}</button>
-          </div>
-          <textarea v-model="importText" spellcheck="false"></textarea>
-          <button class="send-btn" :disabled="busy" @click="importCollection">
-            <Loader2 v-if="busy" class="spin" :size="15" />
-            <Import v-else :size="15" />
-            {{ importMode === 'fetch' ? t.importFetchRequest : t.importPostmanCollection }}
-          </button>
-        </section>
-
-        <section v-if="exportText" class="drawer">
-          <div class="drawer-title">
-            <strong>{{ t.exportedCollection }}</strong>
-            <button class="icon-btn" @click="exportText = ''"><XCircle :size="14" /></button>
-          </div>
-          <textarea v-model="exportText" spellcheck="false"></textarea>
-        </section>
       </section>
     </main>
 
@@ -1270,4 +1505,26 @@ async function createCollectionFromMenu() {
       <span>{{ statusMessage }}</span>
     </footer>
   </div>
+
+  <Teleport to="body">
+    <div v-if="activeModal" class="modal-backdrop" @click.self="closeModal">
+      <section class="modal">
+        <div class="modal-title">
+          <strong>{{ activeModalTitle }}</strong>
+          <button class="modal-close" type="button" title="Close" @click="closeModal">
+            <X :size="14" :stroke-width="1.7" />
+          </button>
+        </div>
+        <textarea v-if="activeModal === 'postman'" v-model="postmanText" spellcheck="false" :aria-label="t.postmanJSON"></textarea>
+        <textarea v-else-if="activeModal === 'fetch'" v-model="fetchText" spellcheck="false" :aria-label="t.fetchSnippet"></textarea>
+        <textarea v-else-if="activeModal === 'curl'" v-model="curlText" spellcheck="false" :aria-label="t.curlSnippet"></textarea>
+        <textarea v-else v-model="exportText" spellcheck="false" readonly :aria-label="t.exportedCollection"></textarea>
+        <button v-if="activeModal !== 'export'" class="send-btn" :disabled="busy" @click="activeModal === 'postman' ? importPostmanCollection() : activeModal === 'fetch' ? importFetchRequest() : importCurlRequest()">
+          <Loader2 v-if="busy" class="spin" :size="15" />
+          <Import v-else :size="15" />
+          {{ activeModalTitle }}
+        </button>
+      </section>
+    </div>
+  </Teleport>
 </template>

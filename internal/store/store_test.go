@@ -82,3 +82,67 @@ func TestStoreRenamesCollection(t *testing.T) {
 		t.Fatalf("collection was not renamed: %#v", state.Collections[0])
 	}
 }
+
+func TestStoreDeletesEmptyCollection(t *testing.T) {
+	s, err := OpenInMemory(t.Context())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	collection := domain.Collection{ID: "c1", Name: "Empty", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := s.SaveCollection(t.Context(), collection); err != nil {
+		t.Fatalf("save collection: %v", err)
+	}
+	if err := s.DeleteCollection(t.Context(), "c1"); err != nil {
+		t.Fatalf("delete collection: %v", err)
+	}
+
+	state, err := s.State(t.Context())
+	if err != nil {
+		t.Fatalf("state: %v", err)
+	}
+	if len(state.Collections) != 0 {
+		t.Fatalf("collections length = %d", len(state.Collections))
+	}
+}
+
+func TestStoreDeletesCollectionCascade(t *testing.T) {
+	s, err := OpenInMemory(t.Context())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	collection := domain.Collection{ID: "c1", Name: "Demo", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := s.SaveCollection(t.Context(), collection); err != nil {
+		t.Fatalf("save collection: %v", err)
+	}
+	if err := s.SaveFolder(t.Context(), domain.Folder{ID: "f1", CollectionID: "c1", Name: "Folder"}); err != nil {
+		t.Fatalf("save folder: %v", err)
+	}
+	req := domain.Request{
+		ID:           "r1",
+		CollectionID: "c1",
+		ParentID:     "f1",
+		Name:         "Ping",
+		Method:       "GET",
+		URL:          "https://example.com",
+		BodyMode:     domain.BodyModeNone,
+		Auth:         domain.AuthConfig{Type: domain.AuthTypeNone, Values: map[string]string{}},
+	}
+	if err := s.SaveRequest(t.Context(), req); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+
+	if err := s.DeleteCollection(t.Context(), "c1"); err != nil {
+		t.Fatalf("delete collection: %v", err)
+	}
+	state, err := s.State(t.Context())
+	if err != nil {
+		t.Fatalf("state: %v", err)
+	}
+	if len(state.Collections) != 0 {
+		t.Fatalf("collections length = %d", len(state.Collections))
+	}
+}
