@@ -107,6 +107,7 @@ button {
 .url-input,
 .title-input,
 .collection-editor input,
+.collection-combo select,
 .field,
 .kv-row input,
 .auth-grid input,
@@ -221,21 +222,6 @@ button {
   font-weight: 600;
 }
 
-.workspace-name {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px;
-  color: #47515f;
-  font-size: 12px;
-}
-
-.sidebar-actions {
-  display: flex;
-  gap: 6px;
-  padding: 0 10px 8px;
-}
-
 .request-list {
   flex: 1;
   min-height: 0;
@@ -304,6 +290,7 @@ button {
 .title-input:focus,
 .url-input:focus,
 .collection-editor input:focus,
+.collection-combo select:focus,
 .field:focus,
 .method-select:focus,
 .env-select:focus,
@@ -545,23 +532,101 @@ button {
 
 .collection-editor {
   display: grid;
-  gap: 5px;
-  padding: 0 10px 8px;
-  color: #526070;
-  font-size: 12px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 6px;
 }
 
-.collection-edit-row {
+.collection-combo {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 28px;
   align-items: center;
-  gap: 6px;
+  min-width: 0;
 }
 
-.collection-editor input {
+.collection-combo input {
   width: 100%;
   height: 30px;
+  border-right: 0;
+  border-radius: 4px 0 0 4px;
   padding: 0 8px;
+  font-weight: 600;
+}
+
+.collection-combo select {
+  width: 28px;
+  height: 30px;
+  padding: 0;
+  border-left-color: #eef1f4;
+  border-radius: 0 4px 4px 0;
+  color: #667085;
+  font-size: 0;
+  cursor: pointer;
+}
+
+.collection-combo select option {
+  color: #1f2933;
+  font-size: 13px;
+}
+
+.collection-menu {
+  position: relative;
+}
+
+.collection-menu summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #d8dde5;
+  border-radius: 5px;
+  background: #fff;
+  color: #354052;
+  cursor: pointer;
+  list-style: none;
+}
+
+.collection-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.collection-menu[open] summary,
+.collection-menu summary:hover {
+  background: #f0f2f5;
+}
+
+.collection-menu > div {
+  position: absolute;
+  top: 32px;
+  right: 0;
+  display: grid;
+  min-width: 132px;
+  padding: 4px;
+  border: 1px solid #d8dde5;
+  border-radius: 5px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+  z-index: 5;
+}
+
+.collection-menu button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #354052;
+  text-align: left;
+  cursor: pointer;
+}
+
+.collection-menu button:hover {
+  background: #f0f2f5;
 }
 
 .field.compact {

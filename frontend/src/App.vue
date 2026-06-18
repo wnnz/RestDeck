@@ -4,7 +4,6 @@ import {
   Activity,
   CheckCircle2,
   Clock3,
-  Database,
   Download,
   FileJson2,
   Globe2,
@@ -14,6 +13,7 @@ import {
   KeyRound,
   ListTree,
   Loader2,
+  MoreHorizontal,
   Play,
   Plus,
   Save,
@@ -91,6 +91,7 @@ const messages = {
     addHeader: '添加请求头',
     addVariable: '添加变量',
     addGlobal: '添加全局变量',
+    newCollection: '新建集合',
     type: '类型',
     addTo: '添加到',
     username: '用户名',
@@ -192,6 +193,7 @@ const messages = {
     addHeader: 'Add header',
     addVariable: 'Add variable',
     addGlobal: 'Add global',
+    newCollection: 'New collection',
     type: 'Type',
     addTo: 'Add to',
     username: 'Username',
@@ -292,6 +294,7 @@ const realtimeBusy = ref(false)
 const statusMessage = ref('')
 const importText = ref('')
 const importMode = ref<ImportMode>('postman')
+const collectionMenuOpen = ref(false)
 const exportText = ref('')
 const runnerResult = ref<domain.RunnerResult | null>(null)
 const wsDraft = reactive({
@@ -343,6 +346,13 @@ const filteredRequests = computed(() => {
   return requests.filter((request) => {
     return request.name.toLowerCase().includes(keyword) || request.url.toLowerCase().includes(keyword) || request.method.toLowerCase().includes(keyword)
   })
+})
+
+const collectionNameDirty = computed(() => {
+  const collection = activeCollection.value
+  if (!collection) return false
+  const nextName = collectionDraft.name.trim()
+  return nextName !== '' && nextName !== collection.name
 })
 
 const prettyResponseBody = computed(() => {
@@ -564,6 +574,7 @@ async function importCollection() {
 }
 
 function openImportDrawer() {
+  collectionMenuOpen.value = false
   importMode.value = 'postman'
   importText.value = JSON.stringify({ info: { name: 'Imported' }, item: [] }, null, 2)
 }
@@ -763,6 +774,11 @@ function tokenizeJSON(raw: string): JsonToken[] {
   }
   return tokens
 }
+
+async function createCollectionFromMenu() {
+  collectionMenuOpen.value = false
+  await createCollection()
+}
 </script>
 
 <template>
@@ -806,25 +822,38 @@ function tokenizeJSON(raw: string): JsonToken[] {
         </div>
 
         <template v-if="activeNav === 'collections'">
-          <div class="workspace-name">
-            <Database :size="14" />
-            <span>{{ t.workspace }}</span>
-          </div>
-          <div class="sidebar-actions">
-            <button class="small-btn" @click="createCollection">{{ t.new }}</button>
-            <button class="small-btn" @click="openImportDrawer">{{ t.import }}</button>
-          </div>
-          <select v-model="activeCollectionId" class="field">
-            <option v-for="collection in state?.collections ?? []" :key="collection.id" :value="collection.id">{{ collection.name }}</option>
-          </select>
           <div v-if="activeCollection" class="collection-editor">
-            <span>{{ t.collectionName }}</span>
-            <div class="collection-edit-row">
+            <div class="collection-combo">
               <input v-model="collectionDraft.name" :placeholder="t.collectionName" @keydown.enter="saveActiveCollection" />
-              <button class="icon-btn" :disabled="busy || !collectionDraft.name.trim()" :title="t.save" @click="saveActiveCollection">
-                <Save :size="14" />
-              </button>
+              <select v-model="activeCollectionId" :title="t.collections">
+                <option v-for="collection in state?.collections ?? []" :key="collection.id" :value="collection.id">{{ collection.name }}</option>
+              </select>
             </div>
+            <button v-if="collectionNameDirty" class="icon-btn" :disabled="busy" :title="t.save" @click="saveActiveCollection">
+              <Save :size="14" />
+            </button>
+            <details :open="collectionMenuOpen" class="collection-menu" @toggle="collectionMenuOpen = ($event.target as HTMLDetailsElement).open">
+              <summary :title="t.import"><MoreHorizontal :size="14" /></summary>
+              <div>
+                <button type="button" @click="createCollectionFromMenu">
+                  <Plus :size="14" />
+                  {{ t.newCollection }}
+                </button>
+                <button type="button" @click="openImportDrawer">
+                  <Import :size="14" />
+                  {{ t.import }}
+                </button>
+              </div>
+            </details>
+          </div>
+          <div v-else class="collection-editor">
+            <button class="small-btn" @click="createCollection">
+              <Plus :size="14" />
+              {{ t.newCollection }}
+            </button>
+            <button class="icon-btn" :title="t.import" @click="openImportDrawer">
+              <Import :size="14" />
+            </button>
           </div>
           <div class="request-list">
             <button
