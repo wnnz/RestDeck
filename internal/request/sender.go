@@ -11,9 +11,12 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -122,10 +125,17 @@ func buildHTTPRequest(ctx context.Context, req domain.Request, resolver *Resolve
 	parsed.RawQuery = query.Encode()
 
 	var body io.Reader
+	multipartContentType := ""
 	switch req.BodyMode {
 	case domain.BodyModeJSON, domain.BodyModeRaw:
 		body = strings.NewReader(resolver.Resolve(req.Body))
-	case domain.BodyModeForm, domain.BodyModeURLEncoded:
+	case domain.BodyModeForm:
+		var err error
+		body, multipartContentType, err = buildMultipartBody(req, resolver)
+		if err != nil {
+			return nil, err
+		}
+	case domain.BodyModeURLEncoded:
 		values := url.Values{}
 		for _, row := range parseBodyRows(req.Body) {
 			if row.Enabled && row.Key != "" {
@@ -154,11 +164,93 @@ func buildHTTPRequest(ctx context.Context, req domain.Request, resolver *Resolve
 	if req.BodyMode == domain.BodyModeJSON && httpReq.Header.Get("Content-Type") == "" {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
+	if req.BodyMode == domain.BodyModeForm && multipartContentType != "" {
+		httpReq.Header.Set("Content-Type", multipartContentType)
+	}
 	if req.BodyMode == domain.BodyModeURLEncoded && httpReq.Header.Get("Content-Type") == "" {
 		httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 	applyAuth(httpReq, req.Auth, resolver)
 	return httpReq, nil
+}
+
+func buildMultipartBody(req domain.Request, resolver *Resolver) (io.Reader, string, error) {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	for _, item := range normalizeFormItems(req.FormItems, req.Body) {
+		if !item.Enabled || item.Key == "" {
+			continue
+		}
+		key := resolver.Resolve(item.Key)
+		if key == "" {
+			continue
+		}
+		if item.Type == "file" {
+			path := strings.TrimSpace(resolver.Resolve(item.FilePath))
+			if path == "" {
+				return nil, "", fmt.Errorf("form file path for %q is required", item.Key)
+			}
+			file, err := os.Open(path)
+			if err != nil {
+				return nil, "", fmt.Errorf("open form file %q: %w", path, err)
+			}
+			part, err := writer.CreateFormFile(key, filepath.Base(path))
+			if err != nil {
+				_ = file.Close()
+				return nil, "", err
+			}
+			if _, err := io.Copy(part, file); err != nil {
+				_ = file.Close()
+				return nil, "", err
+			}
+			if err := file.Close(); err != nil {
+				return nil, "", err
+			}
+			continue
+		}
+		if err := writer.WriteField(key, resolver.Resolve(item.Value)); err != nil {
+			return nil, "", err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, "", err
+	}
+	return &buf, writer.FormDataContentType(), nil
+}
+
+func normalizeFormItems(items []domain.FormItem, fallbackBody string) []domain.FormItem {
+	if len(items) == 0 && fallbackBody != "" {
+		items = formItemsFromBody(fallbackBody)
+	}
+	out := []domain.FormItem{}
+	for _, item := range items {
+		if item.Type != "file" {
+			item.Type = "text"
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func formItemsFromBody(raw string) []domain.FormItem {
+	items := []domain.FormItem{}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		key, value, _ := strings.Cut(line, "=")
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		item := domain.FormItem{Enabled: true, Key: key, Type: "text", Value: value}
+		if strings.HasPrefix(value, "@") {
+			item.Type = "file"
+			item.Value = ""
+			item.FilePath = strings.TrimPrefix(value, "@")
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func parseBodyRows(raw string) []domain.KeyValue {

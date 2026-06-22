@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref, watch } from 'vue'
 import { CheckCircle2, Clock3, Download, FileJson2, Loader2, Plus, Save, Send, Trash2, Wand2, XCircle } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import JsonBodyEditor from './JsonBodyEditor.vue'
@@ -33,9 +34,32 @@ const emit = defineEmits<{
   'create-request': []
   'add-param': []
   'add-header': []
+  'add-form-item': []
   'remove-row': [target: domain.KeyValue[], index: number]
+  'remove-form-item': [index: number]
+  'select-form-file': [index: number]
   'set-auth-type': [value: string]
 }>()
+
+const formEditorMode = ref<'table' | 'text'>('table')
+
+watch(() => activeRequest.value?.id, () => {
+  formEditorMode.value = 'table'
+  ensureFormItems()
+})
+
+watch(() => activeRequest.value?.bodyMode, (mode) => {
+  if (mode === 'form') {
+    formEditorMode.value = 'table'
+    ensureFormItems()
+  }
+})
+
+watch(() => activeRequest.value?.body, (body) => {
+  const request = activeRequest.value
+  if (!request || request.bodyMode !== 'form' || formEditorMode.value !== 'text') return
+  request.formItems = formItemsFromBody(body ?? '')
+})
 
 function sendRequest() {
   void props.sendRequestAction()
@@ -50,6 +74,68 @@ function formatRequestJSON() {
   } catch {
     // Keep invalid JSON untouched while the user is still editing.
   }
+}
+
+function switchFormEditorMode(mode: 'table' | 'text') {
+  if (!activeRequest.value) return
+  if (mode === 'text') {
+    activeRequest.value.body = formItemsToBody(activeRequest.value.formItems ?? [])
+  } else {
+    activeRequest.value.formItems = formItemsFromBody(activeRequest.value.body ?? '')
+  }
+  formEditorMode.value = mode
+}
+
+function toggleFormEditorMode() {
+  switchFormEditorMode(formEditorMode.value === 'table' ? 'text' : 'table')
+}
+
+function ensureFormItems() {
+  const request = activeRequest.value
+  if (!request || request.bodyMode !== 'form') return
+  if (!request.formItems?.length) {
+    request.formItems = formItemsFromBody(request.body ?? '')
+  }
+  if (!request.formItems.length) {
+    request.formItems.push(newFormItem())
+  }
+}
+
+function setFormItemType(item: domain.FormItem, type: string) {
+  item.type = type === 'file' ? 'file' : 'text'
+  if (item.type === 'file') {
+    item.value = ''
+  } else {
+    item.filePath = ''
+  }
+}
+
+function formItemsToBody(items: domain.FormItem[]) {
+  return (items ?? [])
+    .filter((item) => item.key || item.value || item.filePath)
+    .map((item) => `${item.key}=${item.type === 'file' ? `@${item.filePath}` : item.value}`)
+    .join('\n')
+}
+
+function formItemsFromBody(raw: string) {
+  const items = raw
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const index = line.indexOf('=')
+      const key = index >= 0 ? line.slice(0, index).trim() : line.trim()
+      const value = index >= 0 ? line.slice(index + 1).trim() : ''
+      if (value.startsWith('@')) {
+        return new domain.FormItem({ id: crypto.randomUUID(), enabled: true, key, type: 'file', value: '', filePath: value.slice(1), description: '' })
+      }
+      return new domain.FormItem({ id: crypto.randomUUID(), enabled: true, key, type: 'text', value, filePath: '', description: '' })
+    })
+  return items.length ? items : [newFormItem()]
+}
+
+function newFormItem() {
+  return new domain.FormItem({ id: crypto.randomUUID(), enabled: true, key: '', type: 'text', value: '', filePath: '', description: '' })
 }
 </script>
 
@@ -66,8 +152,9 @@ function formatRequestJSON() {
           <Save :size="14" />
           {{ t.save }}
         </button>
-        <button class="icon-btn" :disabled="!activeRequest.id || busy" :title="t.requestDeleted" @click="emit('delete-request')">
+        <button class="toolbar-btn" :disabled="!activeRequest.id || busy" @click="emit('delete-request')">
           <Trash2 :size="14" />
+          {{ t.delete }}
         </button>
         <button class="toolbar-btn" :disabled="!activeCollection" @click="emit('export-collection')">
           <Download :size="14" />
@@ -167,8 +254,35 @@ function formatRequestJSON() {
                 <Wand2 :size="14" />
                 {{ t.formatJSON }}
               </button>
+              <button v-if="activeRequest.bodyMode === 'form'" class="toolbar-btn" type="button" @click="toggleFormEditorMode">
+                {{ formEditorMode === 'table' ? t.formViewMode1 : t.formViewMode2 }}
+              </button>
             </div>
             <JsonBodyEditor v-if="activeRequest.bodyMode === 'json'" v-model="activeRequest.body" />
+            <template v-else-if="activeRequest.bodyMode === 'form'">
+              <div v-if="formEditorMode === 'table'" class="kv-table form-table">
+                <div class="kv-head form-head"><span></span><span>{{ t.key }}</span><span>{{ t.type }}</span><span>{{ t.value }}</span><span>{{ t.description }}</span><span></span></div>
+                <div v-for="(item, index) in activeRequest.formItems" :key="item.id" class="kv-row form-row">
+                  <input v-model="item.enabled" type="checkbox" />
+                  <input v-model="item.key" :placeholder="t.key" />
+                  <select :value="item.type" @change="setFormItemType(item, ($event.target as HTMLSelectElement).value)">
+                    <option value="text">{{ t.text }}</option>
+                    <option value="file">{{ t.file }}</option>
+                  </select>
+                  <div class="form-value-cell">
+                    <input v-if="item.type !== 'file'" v-model="item.value" :placeholder="t.value" />
+                    <template v-else>
+                      <button class="small-btn" type="button" @click="emit('select-form-file', index)">{{ t.chooseFile }}</button>
+                      <span class="file-path" :title="item.filePath">{{ item.filePath }}</span>
+                    </template>
+                  </div>
+                  <input v-model="item.description" :placeholder="t.description" />
+                  <button class="ghost-icon" @click="emit('remove-form-item', index)"><Trash2 :size="13" /></button>
+                </div>
+                <button class="add-row" @click="emit('add-form-item')"><Plus :size="13" /> {{ t.addFormItem }}</button>
+              </div>
+              <textarea v-else v-model="activeRequest.body" spellcheck="false" placeholder="name=value&#10;avatar=@D:\path\file.png"></textarea>
+            </template>
             <textarea v-else-if="activeRequest.bodyMode !== 'none'" v-model="activeRequest.body" spellcheck="false" placeholder='{"hello": "world"}'></textarea>
             <div v-else class="empty-panel">{{ t.noBody }}</div>
           </div>

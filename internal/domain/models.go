@@ -11,6 +11,16 @@ type KeyValue struct {
 	Secret      bool   `json:"secret"`
 }
 
+type FormItem struct {
+	ID          string `json:"id"`
+	Enabled     bool   `json:"enabled"`
+	Key         string `json:"key"`
+	Type        string `json:"type"`
+	Value       string `json:"value"`
+	FilePath    string `json:"filePath"`
+	Description string `json:"description"`
+}
+
 type BodyMode string
 
 const (
@@ -49,6 +59,7 @@ type Request struct {
 	Headers      []KeyValue `json:"headers"`
 	BodyMode     BodyMode   `json:"bodyMode"`
 	Body         string     `json:"body"`
+	FormItems    []FormItem `json:"formItems"`
 	Auth         AuthConfig `json:"auth"`
 	PreScript    string     `json:"preScript"`
 	TestScript   string     `json:"testScript"`

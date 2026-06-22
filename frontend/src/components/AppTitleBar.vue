@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import { Home, Search, Square, X } from 'lucide-vue-next'
+import { Moon, Search, Square, Sun, X } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
+import type { Theme } from '../types'
 
 defineProps<{
   t: Translation
   search: string
+  theme: Theme
   activeEnvironment: domain.Environment | null
   environments: domain.Environment[]
 }>()
 
 const emit = defineEmits<{
   'update:search': [value: string]
-  home: []
+  toggleTheme: []
   selectEnvironment: [id: string]
   minimize: []
   toggleMaximize: []
@@ -23,10 +25,6 @@ const emit = defineEmits<{
 <template>
   <header class="topbar window-titlebar" @dblclick="emit('toggleMaximize')">
     <div class="window-title">RestDeck</div>
-    <button class="top-link" @dblclick.stop @click="emit('home')">
-      <Home :size="14" />
-      {{ t.home }}
-    </button>
     <div class="top-search" @dblclick.stop>
       <Search :size="14" />
       <input :value="search" :placeholder="t.search" @input="emit('update:search', ($event.target as HTMLInputElement).value)" />
@@ -35,6 +33,11 @@ const emit = defineEmits<{
     <select class="env-select" :value="activeEnvironment?.id" @dblclick.stop @change="emit('selectEnvironment', ($event.target as HTMLSelectElement).value)">
       <option v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</option>
     </select>
+    <button type="button" class="top-theme-btn" @dblclick.stop @click="emit('toggleTheme')">
+      <Sun v-if="theme === 'dark'" :size="14" />
+      <Moon v-else :size="14" />
+      {{ theme === 'dark' ? t.light : t.dark }}
+    </button>
     <div class="window-controls" @dblclick.stop>
       <button type="button" class="window-control" title="Minimize" @click="emit('minimize')">
         <span class="minimize-mark"></span>

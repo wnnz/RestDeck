@@ -24,6 +24,7 @@ import {
   SaveEnvironment,
   SaveGlobals,
   SaveRequest,
+  SelectFile,
   SendRequest,
   SetActiveEnvironment,
   TestSSE,
@@ -42,12 +43,13 @@ import SidebarRail from './components/SidebarRail.vue'
 import WorkspaceSidebar from './components/WorkspaceSidebar.vue'
 import { authTypes, bodyModes, methods } from './constants/request'
 import { messages } from './i18n/messages'
-import type { ActiveModal, JsonToken, Language, NavKey, RequestTab, ResponseTab, ResponseView } from './types'
+import type { ActiveModal, JsonToken, Language, NavKey, RequestTab, ResponseTab, ResponseView, Theme } from './types'
 import { formatError } from './utils/format'
 import { tokenizeJSON } from './utils/jsonHighlight'
 
 const state = ref<domain.WorkspaceState | null>(null)
 const language = ref<Language>((localStorage.getItem('restdeck.language') as Language) || 'zh-CN')
+const theme = ref<Theme>((localStorage.getItem('restdeck.theme') as Theme) || 'light')
 const activeNav = ref<NavKey>('collections')
 const activeRequestTab = ref<RequestTab>('params')
 const activeResponseTab = ref<ResponseTab>('body')
@@ -94,7 +96,7 @@ const envDraft = reactive({
   variables: [] as domain.KeyValue[]
 })
 const globalsDraft = ref<domain.KeyValue[]>([])
-const settingsDraft = reactive({ language: 'zh-CN', theme: 'light' })
+const settingsDraft = reactive<{ language: Language; theme: Theme }>({ language: 'zh-CN', theme: 'light' })
 const t = computed(() => messages[language.value])
 const navItems = computed(() => [
   { key: 'collections' as NavKey, label: t.value.collections, icon: ListTree },
@@ -175,6 +177,7 @@ const responseTabs = computed(() => [
 
 onMounted(async () => {
   settingsDraft.language = language.value
+  settingsDraft.theme = theme.value
   document.addEventListener('click', handleDocumentClick, true)
   await loadState()
 })
@@ -187,6 +190,12 @@ watch(language, (next) => {
   settingsDraft.language = next
   localStorage.setItem('restdeck.language', next)
   document.documentElement.lang = next
+}, { immediate: true })
+
+watch(theme, (next) => {
+  settingsDraft.theme = next
+  localStorage.setItem('restdeck.theme', next)
+  document.documentElement.dataset.theme = next
 }, { immediate: true })
 
 watch(activeEnvironment, (env) => {
@@ -220,20 +229,20 @@ function setState(next: domain.WorkspaceState) {
   const collection = collections.find((item) => item.id === activeCollectionId.value)
   if (!activeRequest.value) {
     const first = collection?.requests?.[0]
-    if (first) activeRequest.value = cloneRequest(first)
+    if (first) activeRequest.value = normalizeRequest(cloneRequest(first))
   } else {
     const fresh = collection?.requests?.find((request) => request.id === activeRequest.value?.id)
     if (fresh) {
-      activeRequest.value = cloneRequest(fresh)
+      activeRequest.value = normalizeRequest(cloneRequest(fresh))
     } else {
-      activeRequest.value = collection?.requests?.[0] ? cloneRequest(collection.requests[0]) : null
+      activeRequest.value = collection?.requests?.[0] ? normalizeRequest(cloneRequest(collection.requests[0])) : null
       response.value = null
     }
   }
 }
 
 function selectRequest(request: domain.Request) {
-  activeRequest.value = cloneRequest(request)
+  activeRequest.value = normalizeRequest(cloneRequest(request))
   response.value = null
   activeResponseTab.value = 'body'
 }
@@ -253,7 +262,7 @@ async function createCollection() {
 
 function selectCollection(collection: domain.Collection) {
   activeCollectionId.value = collection.id
-  activeRequest.value = collection.requests?.[0] ? cloneRequest(collection.requests[0]) : null
+  activeRequest.value = collection.requests?.[0] ? normalizeRequest(cloneRequest(collection.requests[0])) : null
   response.value = null
   collectionPickerOpen.value = false
   pendingDeleteCollectionId.value = ''
@@ -304,7 +313,7 @@ async function deleteCollectionFromPicker(collection: domain.Collection) {
     const next = await DeleteCollection(collection.id)
     if (activeCollectionId.value === collection.id) {
       activeCollectionId.value = next.collections?.[0]?.id ?? ''
-      activeRequest.value = next.collections?.[0]?.requests?.[0] ? cloneRequest(next.collections[0].requests[0]) : null
+      activeRequest.value = next.collections?.[0]?.requests?.[0] ? normalizeRequest(cloneRequest(next.collections[0].requests[0])) : null
       response.value = null
     }
     setState(next)
@@ -332,6 +341,7 @@ function createRequest() {
     headers: [new domain.KeyValue({ id: crypto.randomUUID(), enabled: true, key: 'Accept', value: 'application/json', description: '', secret: false })],
     bodyMode: 'none',
     body: '',
+    formItems: [newFormItem()],
     auth: new domain.AuthConfig({ type: 'none', values: {} }),
     preScript: '',
     testScript: 'pm.test("Status is successful", function () { expect(pm.response.code).to.be.ok(); });',
@@ -344,6 +354,7 @@ function createRequest() {
 
 async function saveActiveRequest() {
   if (!activeRequest.value) return
+  syncFormBody(activeRequest.value)
   busy.value = true
   try {
     const next = await SaveRequest(activeRequest.value)
@@ -374,9 +385,10 @@ async function deleteActiveRequest() {
 
 async function sendActiveRequest() {
   if (!activeRequest.value) return
-  const requestToSend = cloneRequest(activeRequest.value)
+  syncFormBody(activeRequest.value)
+  const requestToSend = normalizeRequest(cloneRequest(activeRequest.value))
   if (!requestToSend.id) requestToSend.id = crypto.randomUUID()
-  activeRequest.value = cloneRequest(requestToSend)
+  activeRequest.value = normalizeRequest(cloneRequest(requestToSend))
   busy.value = true
   response.value = null
   try {
@@ -593,12 +605,46 @@ function addHeader() {
   activeRequest.value?.headers.push(newKeyValue())
 }
 
+function addFormItem() {
+  const request = activeRequest.value
+  if (!request) return
+  request.formItems = request.formItems ?? []
+  request.formItems.push(newFormItem())
+  syncFormBody(request)
+}
+
 function addVariable(target: domain.KeyValue[]) {
   target.push(newKeyValue())
 }
 
 function removeRow(target: domain.KeyValue[], index: number) {
   target.splice(index, 1)
+}
+
+function removeFormItem(index: number) {
+  const request = activeRequest.value
+  if (!request) return
+  request.formItems.splice(index, 1)
+  syncFormBody(request)
+}
+
+async function selectFormFile(index: number) {
+  const request = activeRequest.value
+  const item = request?.formItems?.[index]
+  if (!request || !item) return
+  try {
+    const path = await SelectFile()
+    if (!path) return
+    item.filePath = path
+    item.type = 'file'
+    syncFormBody(request)
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
+
+function setTheme(value: Theme) {
+  theme.value = value
 }
 
 function setAuthType(value: string) {
@@ -633,12 +679,77 @@ function newKeyValue() {
   return new domain.KeyValue({ id: crypto.randomUUID(), enabled: true, key: '', value: '', description: '', secret: false })
 }
 
+function newFormItem() {
+  return new domain.FormItem({ id: crypto.randomUUID(), enabled: true, key: '', type: 'text', value: '', filePath: '', description: '' })
+}
+
 function cloneKeyValues(items: domain.KeyValue[]) {
   return items.map((item) => new domain.KeyValue({ ...item }))
 }
 
 function cloneRequest(request: domain.Request) {
   return new domain.Request(JSON.parse(JSON.stringify(request)))
+}
+
+function normalizeRequest(request: domain.Request) {
+  request.params = request.params ?? []
+  request.headers = request.headers ?? []
+  if (request.bodyMode === 'form') {
+    request.formItems = normalizeFormItems(request.formItems ?? [], request.body ?? '')
+    request.body = formItemsToBody(request.formItems)
+  } else {
+    request.formItems = normalizeFormItems(request.formItems ?? [], '')
+  }
+  if (!request.auth) {
+    request.auth = new domain.AuthConfig({ type: 'none', values: {} })
+  }
+  return request
+}
+
+function normalizeFormItems(items: domain.FormItem[], fallbackBody: string) {
+  const source = items.length ? items : formItemsFromBody(fallbackBody)
+  const normalized = source.map((item) => new domain.FormItem({
+    id: item.id || crypto.randomUUID(),
+    enabled: item.enabled ?? true,
+    key: item.key ?? '',
+    type: item.type === 'file' ? 'file' : 'text',
+    value: item.value ?? '',
+    filePath: item.filePath ?? '',
+    description: item.description ?? ''
+  }))
+  return normalized.length ? normalized : [newFormItem()]
+}
+
+function formItemsFromBody(raw: string) {
+  return raw
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const index = line.indexOf('=')
+      const key = index >= 0 ? line.slice(0, index).trim() : line.trim()
+      const value = index >= 0 ? line.slice(index + 1).trim() : ''
+      if (value.startsWith('@')) {
+        return new domain.FormItem({ id: crypto.randomUUID(), enabled: true, key, type: 'file', value: '', filePath: value.slice(1), description: '' })
+      }
+      return new domain.FormItem({ id: crypto.randomUUID(), enabled: true, key, type: 'text', value, filePath: '', description: '' })
+    })
+}
+
+function formItemsToBody(items: domain.FormItem[]) {
+  return (items ?? [])
+    .filter((item) => item.key || item.value || item.filePath)
+    .map((item) => `${item.key}=${item.type === 'file' ? `@${item.filePath}` : item.value}`)
+    .join('\n')
+}
+
+function syncFormBody(request: domain.Request) {
+  if (request.bodyMode === 'form') {
+    request.formItems = normalizeFormItems(request.formItems ?? [], request.body ?? '')
+    request.body = formItemsToBody(request.formItems)
+  } else {
+    request.formItems = normalizeFormItems(request.formItems ?? [], '')
+  }
 }
 
 function minimiseWindow() {
@@ -661,9 +772,10 @@ function closeWindow() {
     <AppTitleBar
       v-model:search="search"
       :t="t"
+      :theme="theme"
       :active-environment="activeEnvironment"
       :environments="state?.environments ?? []"
-      @home="activeNav = 'collections'"
+      @toggle-theme="setTheme(theme === 'dark' ? 'light' : 'dark')"
       @select-environment="setEnvironment"
       @minimize="minimiseWindow"
       @toggle-maximize="toggleWindowMaximise"
@@ -733,7 +845,10 @@ function closeWindow() {
           @create-request="createRequest"
           @add-param="addParam"
           @add-header="addHeader"
+          @add-form-item="addFormItem"
           @remove-row="removeRow"
+          @remove-form-item="removeFormItem"
+          @select-form-file="selectFormFile"
           @set-auth-type="setAuthType"
         />
 
@@ -781,8 +896,6 @@ function closeWindow() {
           v-else
           v-model:language="language"
           :t="t"
-          :theme="settingsDraft.theme"
-          @update:theme="settingsDraft.theme = $event"
         />
       </section>
     </main>

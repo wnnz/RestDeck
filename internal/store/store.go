@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -103,12 +104,13 @@ func (s *Store) migrate(ctx context.Context) error {
 			method TEXT NOT NULL,
 			url TEXT NOT NULL,
 			params_json TEXT NOT NULL,
-			headers_json TEXT NOT NULL,
-			body_mode TEXT NOT NULL,
-			body TEXT NOT NULL,
-			auth_json TEXT NOT NULL,
-			pre_script TEXT NOT NULL,
-			test_script TEXT NOT NULL,
+				headers_json TEXT NOT NULL,
+				body_mode TEXT NOT NULL,
+				body TEXT NOT NULL,
+				form_items_json TEXT NOT NULL DEFAULT '[]',
+				auth_json TEXT NOT NULL,
+				pre_script TEXT NOT NULL,
+				test_script TEXT NOT NULL,
 			timeout_ms INTEGER NOT NULL DEFAULT 30000,
 			sort_order INTEGER NOT NULL DEFAULT 0,
 			updated_at TEXT NOT NULL,
@@ -163,7 +165,36 @@ func (s *Store) migrate(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := s.ensureColumn(ctx, "requests", "form_items_json", `TEXT NOT NULL DEFAULT '[]'`); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue interface{}
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN `+column+` `+definition)
+	return err
 }
 
 func (s *Store) seed(ctx context.Context) error {
@@ -327,6 +358,12 @@ func (s *Store) SaveRequest(ctx context.Context, r domain.Request) error {
 	if r.Auth.Type == "" {
 		r.Auth = domain.AuthConfig{Type: domain.AuthTypeNone, Values: map[string]string{}}
 	}
+	if r.BodyMode == domain.BodyModeForm {
+		r.FormItems = normalizeFormItems(r.FormItems, r.Body)
+		r.Body = formItemsToBody(r.FormItems)
+	} else {
+		r.FormItems = normalizeFormItems(r.FormItems, "")
+	}
 	r.UpdatedAt = time.Now()
 	paramsJSON, err := marshal(r.Params)
 	if err != nil {
@@ -340,17 +377,22 @@ func (s *Store) SaveRequest(ctx context.Context, r domain.Request) error {
 	if err != nil {
 		return err
 	}
+	formItemsJSON, err := marshal(r.FormItems)
+	if err != nil {
+		return err
+	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO requests
-		(id, collection_id, parent_id, name, method, url, params_json, headers_json, body_mode, body, auth_json,
+		(id, collection_id, parent_id, name, method, url, params_json, headers_json, body_mode, body, form_items_json, auth_json,
 		 pre_script, test_script, timeout_ms, sort_order, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET collection_id = excluded.collection_id, parent_id = excluded.parent_id,
 		name = excluded.name, method = excluded.method, url = excluded.url, params_json = excluded.params_json,
 		headers_json = excluded.headers_json, body_mode = excluded.body_mode, body = excluded.body,
+		form_items_json = excluded.form_items_json,
 		auth_json = excluded.auth_json, pre_script = excluded.pre_script, test_script = excluded.test_script,
 		timeout_ms = excluded.timeout_ms, sort_order = excluded.sort_order, updated_at = excluded.updated_at`,
 		r.ID, r.CollectionID, r.ParentID, r.Name, r.Method, r.URL, paramsJSON, headersJSON,
-		string(r.BodyMode), r.Body, authJSON, r.PreScript, r.TestScript, r.TimeoutMs, r.SortOrder, formatTime(r.UpdatedAt))
+		string(r.BodyMode), r.Body, formItemsJSON, authJSON, r.PreScript, r.TestScript, r.TimeoutMs, r.SortOrder, formatTime(r.UpdatedAt))
 	return err
 }
 
@@ -578,7 +620,7 @@ func (s *Store) listFolders(ctx context.Context, collectionID string) ([]domain.
 
 func (s *Store) listRequests(ctx context.Context, collectionID string) ([]domain.Request, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, collection_id, parent_id, name, method, url,
-		params_json, headers_json, body_mode, body, auth_json, pre_script, test_script, timeout_ms,
+		params_json, headers_json, body_mode, body, form_items_json, auth_json, pre_script, test_script, timeout_ms,
 		sort_order, updated_at FROM requests WHERE collection_id = ? ORDER BY sort_order, name`, collectionID)
 	if err != nil {
 		return nil, err
@@ -587,9 +629,9 @@ func (s *Store) listRequests(ctx context.Context, collectionID string) ([]domain
 	requests := []domain.Request{}
 	for rows.Next() {
 		var r domain.Request
-		var paramsJSON, headersJSON, authJSON, bodyMode, updatedAt string
+		var paramsJSON, headersJSON, formItemsJSON, authJSON, bodyMode, updatedAt string
 		if err := rows.Scan(&r.ID, &r.CollectionID, &r.ParentID, &r.Name, &r.Method, &r.URL,
-			&paramsJSON, &headersJSON, &bodyMode, &r.Body, &authJSON, &r.PreScript, &r.TestScript,
+			&paramsJSON, &headersJSON, &bodyMode, &r.Body, &formItemsJSON, &authJSON, &r.PreScript, &r.TestScript,
 			&r.TimeoutMs, &r.SortOrder, &updatedAt); err != nil {
 			return nil, err
 		}
@@ -602,7 +644,16 @@ func (s *Store) listRequests(ctx context.Context, collectionID string) ([]domain
 		if err := unmarshal(authJSON, &r.Auth); err != nil {
 			return nil, err
 		}
+		if err := unmarshal(formItemsJSON, &r.FormItems); err != nil {
+			return nil, err
+		}
 		r.BodyMode = domain.BodyMode(bodyMode)
+		if r.BodyMode == domain.BodyModeForm {
+			r.FormItems = normalizeFormItems(r.FormItems, r.Body)
+			r.Body = formItemsToBody(r.FormItems)
+		} else {
+			r.FormItems = normalizeFormItems(r.FormItems, "")
+		}
 		r.UpdatedAt = parseTime(updatedAt)
 		requests = append(requests, r)
 	}
@@ -622,6 +673,68 @@ func unmarshal(raw string, v interface{}) error {
 		raw = "null"
 	}
 	return json.Unmarshal([]byte(raw), v)
+}
+
+func normalizeFormItems(items []domain.FormItem, fallbackBody string) []domain.FormItem {
+	if len(items) == 0 && fallbackBody != "" {
+		items = formItemsFromBody(fallbackBody)
+	}
+	out := []domain.FormItem{}
+	for _, item := range items {
+		if item.ID == "" {
+			item.ID = uuid.NewString()
+		}
+		if item.Type != "file" {
+			item.Type = "text"
+		}
+		if item.Key == "" && item.Value == "" && item.FilePath == "" && item.Description == "" {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func formItemsFromBody(raw string) []domain.FormItem {
+	items := []domain.FormItem{}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		key, value, _ := strings.Cut(line, "=")
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		item := domain.FormItem{
+			ID:      uuid.NewString(),
+			Enabled: true,
+			Key:     key,
+			Type:    "text",
+			Value:   value,
+		}
+		if strings.HasPrefix(value, "@") {
+			item.Type = "file"
+			item.Value = ""
+			item.FilePath = strings.TrimPrefix(value, "@")
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func formItemsToBody(items []domain.FormItem) string {
+	lines := []string{}
+	for _, item := range items {
+		if item.Key == "" {
+			continue
+		}
+		value := item.Value
+		if item.Type == "file" {
+			value = "@" + item.FilePath
+		}
+		lines = append(lines, item.Key+"="+value)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func formatTime(t time.Time) string {

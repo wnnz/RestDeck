@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"restdeck/internal/domain"
 	"restdeck/internal/realtime"
@@ -86,6 +87,12 @@ func (a *App) SaveRequest(r domain.Request) (domain.WorkspaceState, error) {
 		return domain.WorkspaceState{}, err
 	}
 	return a.GetState()
+}
+
+func (a *App) SelectFile() (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择文件",
+	})
 }
 
 func (a *App) DeleteRequest(id string) (domain.WorkspaceState, error) {

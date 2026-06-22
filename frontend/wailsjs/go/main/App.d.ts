@@ -31,6 +31,8 @@ export function SaveGlobals(arg1:Array<domain.KeyValue>):Promise<domain.Workspac
 
 export function SaveRequest(arg1:domain.Request):Promise<domain.WorkspaceState>;
 
+export function SelectFile():Promise<string>;
+
 export function SendRequest(arg1:domain.Request,arg2:string,arg3:Array<domain.KeyValue>):Promise<domain.Response>;
 
 export function SetActiveEnvironment(arg1:string):Promise<domain.WorkspaceState>;

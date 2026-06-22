@@ -14,6 +14,30 @@ export namespace domain {
 	        this.values = source["values"];
 	    }
 	}
+	export class FormItem {
+	    id: string;
+	    enabled: boolean;
+	    key: string;
+	    type: string;
+	    value: string;
+	    filePath: string;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FormItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.enabled = source["enabled"];
+	        this.key = source["key"];
+	        this.type = source["type"];
+	        this.value = source["value"];
+	        this.filePath = source["filePath"];
+	        this.description = source["description"];
+	    }
+	}
 	export class KeyValue {
 	    id: string;
 	    enabled: boolean;
@@ -47,6 +71,7 @@ export namespace domain {
 	    headers: KeyValue[];
 	    bodyMode: string;
 	    body: string;
+	    formItems: FormItem[];
 	    auth: AuthConfig;
 	    preScript: string;
 	    testScript: string;
@@ -71,6 +96,7 @@ export namespace domain {
 	        this.headers = this.convertValues(source["headers"], KeyValue);
 	        this.bodyMode = source["bodyMode"];
 	        this.body = source["body"];
+	        this.formItems = this.convertValues(source["formItems"], FormItem);
 	        this.auth = this.convertValues(source["auth"], AuthConfig);
 	        this.preScript = source["preScript"];
 	        this.testScript = source["testScript"];
@@ -264,6 +290,7 @@ export namespace domain {
 		    return a;
 		}
 	}
+	
 	
 	export class TestResult {
 	    name: string;

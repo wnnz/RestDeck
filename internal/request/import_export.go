@@ -128,7 +128,7 @@ func walkPostmanItems(c *domain.Collection, parentID string, items []postmanItem
 			UpdatedAt:    time.Now(),
 		}
 		if item.Request.Body != nil {
-			req.BodyMode, req.Body = importBody(*item.Request.Body)
+			req.BodyMode, req.Body, req.FormItems = importBody(*item.Request.Body)
 		}
 		for _, event := range item.Request.Event {
 			script := strings.Join(event.Script.Exec, "\n")
@@ -186,22 +186,23 @@ func importKV(items []postmanKV) []domain.KeyValue {
 	return out
 }
 
-func importBody(body postmanBody) (domain.BodyMode, string) {
+func importBody(body postmanBody) (domain.BodyMode, string, []domain.FormItem) {
 	switch body.Mode {
 	case "raw":
 		if strings.TrimSpace(body.Raw) == "" {
-			return domain.BodyModeRaw, ""
+			return domain.BodyModeRaw, "", nil
 		}
 		if strings.HasPrefix(strings.TrimSpace(body.Raw), "{") || strings.HasPrefix(strings.TrimSpace(body.Raw), "[") {
-			return domain.BodyModeJSON, body.Raw
+			return domain.BodyModeJSON, body.Raw, nil
 		}
-		return domain.BodyModeRaw, body.Raw
+		return domain.BodyModeRaw, body.Raw, nil
 	case "urlencoded":
-		return domain.BodyModeURLEncoded, kvLines(body.URLEncoded)
+		return domain.BodyModeURLEncoded, kvLines(body.URLEncoded), nil
 	case "formdata":
-		return domain.BodyModeForm, kvLines(body.FormData)
+		items := importFormItems(body.FormData)
+		return domain.BodyModeForm, formItemsToBody(items), items
 	default:
-		return domain.BodyModeNone, ""
+		return domain.BodyModeNone, "", nil
 	}
 }
 
@@ -213,6 +214,27 @@ func kvLines(items []postmanKV) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func importFormItems(items []postmanKV) []domain.FormItem {
+	out := []domain.FormItem{}
+	for _, item := range items {
+		formItem := domain.FormItem{
+			ID:          uuid.NewString(),
+			Enabled:     !item.Disabled,
+			Key:         item.Key,
+			Type:        "text",
+			Value:       item.Value,
+			Description: item.Description,
+		}
+		if item.Type == "file" || strings.HasPrefix(item.Value, "@") {
+			formItem.Type = "file"
+			formItem.Value = ""
+			formItem.FilePath = strings.TrimPrefix(item.Value, "@")
+		}
+		out = append(out, formItem)
+	}
+	return out
 }
 
 func importAuth(auth *postmanAuth) domain.AuthConfig {
@@ -316,10 +338,46 @@ func exportBody(req domain.Request) *postmanBody {
 	case domain.BodyModeURLEncoded:
 		return &postmanBody{Mode: "urlencoded", URLEncoded: linesToKV(req.Body)}
 	case domain.BodyModeForm:
-		return &postmanBody{Mode: "formdata", FormData: linesToKV(req.Body)}
+		return &postmanBody{Mode: "formdata", FormData: formItemsToPostmanKV(req.FormItems, req.Body)}
 	default:
 		return nil
 	}
+}
+
+func formItemsToPostmanKV(items []domain.FormItem, fallbackBody string) []postmanKV {
+	if len(items) == 0 {
+		return linesToKV(fallbackBody)
+	}
+	out := []postmanKV{}
+	for _, item := range items {
+		if item.Key == "" {
+			continue
+		}
+		value := item.Value
+		itemType := item.Type
+		if itemType == "file" {
+			value = item.FilePath
+		} else {
+			itemType = "text"
+		}
+		out = append(out, postmanKV{Key: item.Key, Value: value, Description: item.Description, Disabled: !item.Enabled, Type: itemType})
+	}
+	return out
+}
+
+func formItemsToBody(items []domain.FormItem) string {
+	lines := []string{}
+	for _, item := range items {
+		if item.Key == "" {
+			continue
+		}
+		value := item.Value
+		if item.Type == "file" {
+			value = "@" + item.FilePath
+		}
+		lines = append(lines, item.Key+"="+value)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func linesToKV(raw string) []postmanKV {

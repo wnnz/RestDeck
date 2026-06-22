@@ -58,6 +58,10 @@ export function SaveRequest(arg1) {
   return window['go']['main']['App']['SaveRequest'](arg1);
 }
 
+export function SelectFile() {
+  return window['go']['main']['App']['SelectFile']();
+}
+
 export function SendRequest(arg1, arg2, arg3) {
   return window['go']['main']['App']['SendRequest'](arg1, arg2, arg3);
 }
