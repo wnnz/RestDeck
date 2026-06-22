@@ -11,7 +11,9 @@ import {
 import { Quit, WindowMinimise, WindowToggleMaximise } from '../wailsjs/runtime/runtime'
 import {
   CreateCollection,
+  CreateEnvironment,
   DeleteCollection,
+  DeleteEnvironment,
   DeleteRequest,
   ExportPostmanCollection,
   FormatBody,
@@ -24,6 +26,7 @@ import {
   SaveEnvironment,
   SaveGlobals,
   SaveRequest,
+  SaveSettings,
   SelectFile,
   SendRequest,
   SetActiveEnvironment,
@@ -43,7 +46,7 @@ import SidebarRail from './components/SidebarRail.vue'
 import WorkspaceSidebar from './components/WorkspaceSidebar.vue'
 import { authTypes, bodyModes, methods } from './constants/request'
 import { messages } from './i18n/messages'
-import type { ActiveModal, JsonToken, Language, NavKey, RequestTab, ResponseTab, ResponseView, Theme } from './types'
+import type { ActiveModal, JsonToken, Language, NavKey, RequestTab, ResponseTab, ResponseView, Theme, VariableSuggestion } from './types'
 import { formatError } from './utils/format'
 import { tokenizeJSON } from './utils/jsonHighlight'
 
@@ -51,6 +54,7 @@ const state = ref<domain.WorkspaceState | null>(null)
 const language = ref<Language>((localStorage.getItem('restdeck.language') as Language) || 'zh-CN')
 const theme = ref<Theme>((localStorage.getItem('restdeck.theme') as Theme) || 'light')
 const activeNav = ref<NavKey>('collections')
+const environmentPanel = ref<'environment' | 'globals'>('environment')
 const activeRequestTab = ref<RequestTab>('params')
 const activeResponseTab = ref<ResponseTab>('body')
 const responseView = ref<ResponseView>('pretty')
@@ -79,11 +83,13 @@ const wsDraft = reactive({
   url: 'wss://echo.websocket.events',
   message: '{ "hello": "restdeck" }',
   headers: [] as domain.KeyValue[],
+  proxy: new domain.ProxyConfig({ mode: 'inherit', url: '' }),
   timeoutMs: 10000
 })
 const sseDraft = reactive({
   url: '{{baseUrl}}/sse',
   headers: [] as domain.KeyValue[],
+  proxy: new domain.ProxyConfig({ mode: 'inherit', url: '' }),
   timeoutMs: 10000,
   maxEvents: 5
 })
@@ -96,7 +102,7 @@ const envDraft = reactive({
   variables: [] as domain.KeyValue[]
 })
 const globalsDraft = ref<domain.KeyValue[]>([])
-const settingsDraft = reactive<{ language: Language; theme: Theme }>({ language: 'zh-CN', theme: 'light' })
+const settingsDraft = reactive<domain.Settings>(new domain.Settings({ language: 'zh-CN', theme: 'light', defaultProxy: { mode: 'none', url: '' } }))
 const t = computed(() => messages[language.value])
 const navItems = computed(() => [
   { key: 'collections' as NavKey, label: t.value.collections, icon: ListTree },
@@ -175,6 +181,38 @@ const responseTabs = computed(() => [
   { key: 'tests' as ResponseTab, label: t.value.tests, count: response.value?.testResults?.length ?? 0 }
 ])
 
+const dynamicVariables = [
+  { name: '$guid', detail: 'GUID' },
+  { name: '$randomUUID', detail: 'UUID' },
+  { name: '$timestamp', detail: 'Unix timestamp' },
+  { name: '$isoTimestamp', detail: 'ISO timestamp' },
+  { name: '$randomInt', detail: 'Random number' },
+  { name: '$randomBoolean', detail: 'Random boolean' },
+  { name: '$randomEmail', detail: 'Random email' },
+  { name: '$randomUserName', detail: 'Random user' },
+  { name: '$randomFirstName', detail: 'Random name' }
+]
+
+const variableSuggestions = computed<VariableSuggestion[]>(() => {
+  const seen = new Set<string>()
+  const out: VariableSuggestion[] = []
+  const push = (name: string, detail: string) => {
+    if (!name || seen.has(name)) return
+    seen.add(name)
+    out.push({ name, detail })
+  }
+  for (const variable of globalsDraft.value ?? []) {
+    if (variable.enabled && variable.key) push(variable.key, t.value.globalVariable)
+  }
+  for (const variable of envDraft.variables ?? []) {
+    if (variable.enabled && variable.key) push(variable.key, variable.valueType === 'responseJsonPath' ? t.value.responseVariable : t.value.environmentVariable)
+  }
+  for (const variable of dynamicVariables) {
+    push(variable.name, variable.detail)
+  }
+  return out
+})
+
 onMounted(async () => {
   settingsDraft.language = language.value
   settingsDraft.theme = theme.value
@@ -207,6 +245,13 @@ watch(activeEnvironment, (env) => {
 
 watch(state, (next) => {
   globalsDraft.value = cloneKeyValues(next?.globals ?? [])
+  if (next?.settings) {
+    settingsDraft.language = (next.settings.language as Language) || language.value
+    settingsDraft.theme = (next.settings.theme as Theme) || theme.value
+    settingsDraft.defaultProxy = normalizeProxy(next.settings.defaultProxy, 'none')
+    language.value = settingsDraft.language as Language
+    theme.value = settingsDraft.theme as Theme
+  }
 })
 
 async function loadState() {
@@ -343,6 +388,7 @@ function createRequest() {
     body: '',
     formItems: [newFormItem()],
     auth: new domain.AuthConfig({ type: 'none', values: {} }),
+    proxy: new domain.ProxyConfig({ mode: 'inherit', url: '' }),
     preScript: '',
     testScript: 'pm.test("Status is successful", function () { expect(pm.response.code).to.be.ok(); });',
     timeoutMs: 30000,
@@ -536,7 +582,7 @@ async function saveEnvironmentDraft() {
   const env = new domain.Environment({
     id: envDraft.id,
     name: envDraft.name || t.value.environments,
-    variables: envDraft.variables,
+    variables: envDraft.variables.map(normalizeKeyValue),
     isActive: true
   })
   const next = await SaveEnvironment(env)
@@ -544,16 +590,86 @@ async function saveEnvironmentDraft() {
   statusMessage.value = t.value.environmentSaved
 }
 
+async function createEnvironment() {
+  busy.value = true
+  try {
+    const next = await CreateEnvironment(`${t.value.environments} ${(state.value?.environments?.length ?? 0) + 1}`)
+    setState(next)
+    environmentPanel.value = 'environment'
+    statusMessage.value = t.value.environmentCreated
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function deleteEnvironment(id: string) {
+  if (!id) return
+  busy.value = true
+  try {
+    const next = await DeleteEnvironment(id)
+    setState(next)
+    statusMessage.value = t.value.environmentDeleted
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function renameEnvironment(env: domain.Environment, name: string) {
+  const nextName = name.trim()
+  if (!env?.id || !nextName || nextName === env.name) return
+  busy.value = true
+  try {
+    const variables = env.id === envDraft.id ? envDraft.variables.map(normalizeKeyValue) : cloneKeyValues(env.variables ?? [])
+    const next = await SaveEnvironment(new domain.Environment({
+      ...env,
+      name: nextName,
+      variables,
+      isActive: env.id === activeEnvironment.value?.id || env.isActive
+    }))
+    setState(next)
+    statusMessage.value = t.value.environmentSaved
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
+}
+
 async function setEnvironment(id: string) {
+  environmentPanel.value = 'environment'
   const next = await SetActiveEnvironment(id)
   setState(next)
   statusMessage.value = t.value.environmentSelected
 }
 
+function selectGlobalEnvironment() {
+  environmentPanel.value = 'globals'
+}
+
 async function saveGlobalsDraft() {
-  const next = await SaveGlobals(globalsDraft.value)
+  const next = await SaveGlobals(globalsDraft.value.map(normalizeKeyValue))
   setState(next)
   statusMessage.value = t.value.globalsSaved
+}
+
+async function saveSettingsDraft() {
+  busy.value = true
+  try {
+    settingsDraft.language = language.value
+    settingsDraft.theme = theme.value
+    settingsDraft.defaultProxy = normalizeProxy(settingsDraft.defaultProxy, 'none')
+    const next = await SaveSettings(new domain.Settings(settingsDraft))
+    setState(next)
+    statusMessage.value = t.value.settingsSaved
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
 }
 
 async function runActiveCollection() {
@@ -676,7 +792,21 @@ function authBadgeCount(request: domain.Request | null) {
 }
 
 function newKeyValue() {
-  return new domain.KeyValue({ id: crypto.randomUUID(), enabled: true, key: '', value: '', description: '', secret: false })
+  return new domain.KeyValue({
+    id: crypto.randomUUID(),
+    enabled: true,
+    key: '',
+    value: '',
+    description: '',
+    secret: false,
+    valueType: 'static',
+    timestampFormat: 'seconds',
+    sourceRequestId: '',
+    jsonPath: '$.',
+    responseStrategy: 'latestHistory',
+    refreshAfterSeconds: 300,
+    fallbackValue: ''
+  })
 }
 
 function newFormItem() {
@@ -684,7 +814,7 @@ function newFormItem() {
 }
 
 function cloneKeyValues(items: domain.KeyValue[]) {
-  return items.map((item) => new domain.KeyValue({ ...item }))
+  return items.map((item) => normalizeKeyValue(new domain.KeyValue({ ...item })))
 }
 
 function cloneRequest(request: domain.Request) {
@@ -694,6 +824,9 @@ function cloneRequest(request: domain.Request) {
 function normalizeRequest(request: domain.Request) {
   request.params = request.params ?? []
   request.headers = request.headers ?? []
+  request.params = request.params.map(normalizeKeyValue)
+  request.headers = request.headers.map(normalizeKeyValue)
+  request.proxy = normalizeProxy(request.proxy, 'inherit')
   if (request.bodyMode === 'form') {
     request.formItems = normalizeFormItems(request.formItems ?? [], request.body ?? '')
     request.body = formItemsToBody(request.formItems)
@@ -704,6 +837,28 @@ function normalizeRequest(request: domain.Request) {
     request.auth = new domain.AuthConfig({ type: 'none', values: {} })
   }
   return request
+}
+
+function normalizeKeyValue(item: domain.KeyValue) {
+  item.id = item.id || crypto.randomUUID()
+  item.enabled = item.enabled ?? true
+  item.key = item.key ?? ''
+  item.value = item.value ?? ''
+  item.description = item.description ?? ''
+  item.secret = item.secret ?? false
+  item.valueType = item.valueType || 'static'
+  item.timestampFormat = item.timestampFormat || 'seconds'
+  item.sourceRequestId = item.sourceRequestId || ''
+  item.jsonPath = item.jsonPath || '$.'
+  item.responseStrategy = item.responseStrategy || 'latestHistory'
+  item.refreshAfterSeconds = item.refreshAfterSeconds || 300
+  item.fallbackValue = item.fallbackValue || ''
+  return item
+}
+
+function normalizeProxy(proxy: domain.ProxyConfig | undefined, fallbackMode: 'inherit' | 'none') {
+  const mode = proxy?.mode === 'custom' || proxy?.mode === 'none' || proxy?.mode === 'inherit' ? proxy.mode : fallbackMode
+  return new domain.ProxyConfig({ mode, url: mode === 'custom' ? (proxy?.url ?? '') : '' })
 }
 
 function normalizeFormItems(items: domain.FormItem[], fallbackBody: string) {
@@ -782,10 +937,11 @@ function closeWindow() {
       @close="closeWindow"
     />
 
-    <main class="workspace">
+    <main :class="['workspace', { 'workspace-no-sidebar': activeNav === 'history' || activeNav === 'settings' }]">
       <SidebarRail v-model:active-nav="activeNav" :items="navItems" />
 
       <WorkspaceSidebar
+        v-if="activeNav !== 'history' && activeNav !== 'settings'"
         v-model:collection-picker-open="collectionPickerOpen"
         v-model:add-menu-open="addMenuOpen"
         v-model:options-menu-open="optionsMenuOpen"
@@ -799,7 +955,7 @@ function closeWindow() {
         :active-request="activeRequest"
         :environments="state?.environments ?? []"
         :active-environment="activeEnvironment"
-        :history="state?.history ?? []"
+        :environment-panel="environmentPanel"
         :editing-collection-id="editingCollectionId"
         :pending-delete-collection-id="pendingDeleteCollectionId"
         :runner-busy="runnerBusy"
@@ -816,7 +972,11 @@ function closeWindow() {
         @open-postman-modal="openPostmanModal"
         @export-collection="exportCollection"
         @select-request="selectRequest"
+        @create-environment="createEnvironment"
         @select-environment="setEnvironment"
+        @select-global-environment="selectGlobalEnvironment"
+        @rename-environment="renameEnvironment"
+        @delete-environment="deleteEnvironment"
         @run-collection="runActiveCollection"
       />
 
@@ -838,6 +998,7 @@ function closeWindow() {
           :methods="methods"
           :auth-types="authTypes"
           :body-modes="bodyModes"
+          :variable-suggestions="variableSuggestions"
           :send-request-action="sendActiveRequest"
           @save-request="saveActiveRequest"
           @delete-request="deleteActiveRequest"
@@ -857,7 +1018,9 @@ function closeWindow() {
           v-model:env-draft="envDraft"
           v-model:globals-draft="globalsDraft"
           :t="t"
-          :active-environment="activeEnvironment"
+          :mode="environmentPanel"
+          :collections="state?.collections ?? []"
+          :variable-suggestions="variableSuggestions"
           @save-environment="saveEnvironmentDraft"
           @save-globals="saveGlobalsDraft"
           @add-variable="addVariable"
@@ -885,6 +1048,7 @@ function closeWindow() {
           v-model:ws-draft="wsDraft"
           v-model:sse-draft="sseDraft"
           :t="t"
+          :variable-suggestions="variableSuggestions"
           :realtime-busy="realtimeBusy"
           :ws-result="wsResult"
           :sse-result="sseResult"
@@ -895,7 +1059,9 @@ function closeWindow() {
         <SettingsView
           v-else
           v-model:language="language"
+          v-model:settings-draft="settingsDraft"
           :t="t"
+          @save-settings="saveSettingsDraft"
         />
       </section>
     </main>

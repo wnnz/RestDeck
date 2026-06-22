@@ -31,7 +31,7 @@ func TestWebSocketEcho(t *testing.T) {
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
-	result := NewService().TestWebSocket(t.Context(), WebSocketRequest{URL: wsURL, Message: "hello", TimeoutMs: 3000}, emptyEnv(), nil)
+	result := NewService().TestWebSocket(t.Context(), WebSocketRequest{URL: wsURL, Message: "hello", TimeoutMs: 3000}, emptyEnv(), nil, domain.ProxyConfig{Mode: "none"})
 	if result.Error != "" {
 		t.Fatalf("websocket error: %s", result.Error)
 	}
@@ -49,7 +49,7 @@ func TestSSECollectsEvents(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result := NewService().TestSSE(t.Context(), SSERequest{URL: server.URL, TimeoutMs: 3000, MaxEvents: 2}, emptyEnv(), nil)
+	result := NewService().TestSSE(t.Context(), SSERequest{URL: server.URL, TimeoutMs: 3000, MaxEvents: 2}, emptyEnv(), nil, domain.ProxyConfig{Mode: "none"})
 	if result.Error != "" {
 		t.Fatalf("sse error: %s", result.Error)
 	}

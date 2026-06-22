@@ -40,15 +40,31 @@ func NewSender() *Sender {
 
 func (s *Sender) Send(ctx context.Context, req domain.Request, env domain.Environment, globals []domain.KeyValue) (domain.Response, error) {
 	resolver := NewResolver(env, globals)
-	return s.SendWithVariables(ctx, req, resolver.Values())
+	variables, err := resolver.ValuesWithError()
+	if err != nil {
+		return domain.Response{Error: err.Error()}, err
+	}
+	return s.SendWithVariables(ctx, req, variables)
 }
 
 func (s *Sender) SendWithVariables(ctx context.Context, req domain.Request, variables map[string]string) (domain.Response, error) {
+	return s.SendWithVariablesAndProxy(ctx, req, variables, domain.ProxyConfig{Mode: "none"})
+}
+
+func (s *Sender) SendWithVariablesAndProxy(ctx context.Context, req domain.Request, variables map[string]string, defaultProxy domain.ProxyConfig) (domain.Response, error) {
 	resolver := NewResolver(domain.Environment{}, nil)
 	resolver.values = variables
 	httpReq, err := buildHTTPRequest(ctx, req, resolver)
 	if err != nil {
 		return domain.Response{Error: err.Error()}, err
+	}
+	effectiveProxy, err := EffectiveProxy(req.Proxy, defaultProxy)
+	if err != nil {
+		return domain.Response{Error: err.Error(), RequestedURL: httpReq.URL.String()}, err
+	}
+	transport, err := HTTPTransportForProxy(effectiveProxy)
+	if err != nil {
+		return domain.Response{Error: err.Error(), RequestedURL: httpReq.URL.String()}, err
 	}
 	timeout := req.TimeoutMs
 	if timeout <= 0 {
@@ -59,7 +75,12 @@ func (s *Sender) SendWithVariables(ctx context.Context, req domain.Request, vari
 	httpReq = httpReq.WithContext(ctx)
 
 	start := time.Now()
-	httpRes, err := s.client.Do(httpReq)
+	client := &http.Client{
+		Jar:       s.client.Jar,
+		Timeout:   time.Duration(timeout) * time.Millisecond,
+		Transport: transport,
+	}
+	httpRes, err := client.Do(httpReq)
 	duration := time.Since(start)
 	if err != nil {
 		return domain.Response{

@@ -6,8 +6,16 @@ export function CreateCollection(arg1) {
   return window['go']['main']['App']['CreateCollection'](arg1);
 }
 
+export function CreateEnvironment(arg1) {
+  return window['go']['main']['App']['CreateEnvironment'](arg1);
+}
+
 export function DeleteCollection(arg1) {
   return window['go']['main']['App']['DeleteCollection'](arg1);
+}
+
+export function DeleteEnvironment(arg1) {
+  return window['go']['main']['App']['DeleteEnvironment'](arg1);
 }
 
 export function DeleteRequest(arg1) {
@@ -56,6 +64,10 @@ export function SaveGlobals(arg1) {
 
 export function SaveRequest(arg1) {
   return window['go']['main']['App']['SaveRequest'](arg1);
+}
+
+export function SaveSettings(arg1) {
+  return window['go']['main']['App']['SaveSettings'](arg1);
 }
 
 export function SelectFile() {

@@ -14,6 +14,20 @@ export namespace domain {
 	        this.values = source["values"];
 	    }
 	}
+	export class ProxyConfig {
+	    mode: string;
+	    url: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProxyConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.url = source["url"];
+	    }
+	}
 	export class FormItem {
 	    id: string;
 	    enabled: boolean;
@@ -45,6 +59,13 @@ export namespace domain {
 	    value: string;
 	    description: string;
 	    secret: boolean;
+	    valueType: string;
+	    timestampFormat: string;
+	    sourceRequestId: string;
+	    jsonPath: string;
+	    responseStrategy: string;
+	    refreshAfterSeconds: number;
+	    fallbackValue: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new KeyValue(source);
@@ -58,6 +79,13 @@ export namespace domain {
 	        this.value = source["value"];
 	        this.description = source["description"];
 	        this.secret = source["secret"];
+	        this.valueType = source["valueType"];
+	        this.timestampFormat = source["timestampFormat"];
+	        this.sourceRequestId = source["sourceRequestId"];
+	        this.jsonPath = source["jsonPath"];
+	        this.responseStrategy = source["responseStrategy"];
+	        this.refreshAfterSeconds = source["refreshAfterSeconds"];
+	        this.fallbackValue = source["fallbackValue"];
 	    }
 	}
 	export class Request {
@@ -73,6 +101,7 @@ export namespace domain {
 	    body: string;
 	    formItems: FormItem[];
 	    auth: AuthConfig;
+	    proxy: ProxyConfig;
 	    preScript: string;
 	    testScript: string;
 	    timeoutMs: number;
@@ -98,6 +127,7 @@ export namespace domain {
 	        this.body = source["body"];
 	        this.formItems = this.convertValues(source["formItems"], FormItem);
 	        this.auth = this.convertValues(source["auth"], AuthConfig);
+	        this.proxy = this.convertValues(source["proxy"], ProxyConfig);
 	        this.preScript = source["preScript"];
 	        this.testScript = source["testScript"];
 	        this.timeoutMs = source["timeoutMs"];
@@ -410,6 +440,7 @@ export namespace domain {
 	
 	
 	
+	
 	export class RunnerResult {
 	    id: string;
 	    collectionId: string;
@@ -459,6 +490,40 @@ export namespace domain {
 		    return a;
 		}
 	}
+	export class Settings {
+	    language: string;
+	    theme: string;
+	    defaultProxy: ProxyConfig;
+	
+	    static createFrom(source: any = {}) {
+	        return new Settings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.language = source["language"];
+	        this.theme = source["theme"];
+	        this.defaultProxy = this.convertValues(source["defaultProxy"], ProxyConfig);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	
 	export class WorkspaceState {
 	    collections: Collection[];
@@ -466,6 +531,7 @@ export namespace domain {
 	    history: HistoryItem[];
 	    globals: KeyValue[];
 	    activeEnvironmentId: string;
+	    settings: Settings;
 	
 	    static createFrom(source: any = {}) {
 	        return new WorkspaceState(source);
@@ -478,6 +544,7 @@ export namespace domain {
 	        this.history = this.convertValues(source["history"], HistoryItem);
 	        this.globals = this.convertValues(source["globals"], KeyValue);
 	        this.activeEnvironmentId = source["activeEnvironmentId"];
+	        this.settings = this.convertValues(source["settings"], Settings);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -506,6 +573,7 @@ export namespace realtime {
 	export class SSERequest {
 	    url: string;
 	    headers: domain.KeyValue[];
+	    proxy: domain.ProxyConfig;
 	    timeoutMs: number;
 	    maxEvents: number;
 	
@@ -517,6 +585,7 @@ export namespace realtime {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.url = source["url"];
 	        this.headers = this.convertValues(source["headers"], domain.KeyValue);
+	        this.proxy = this.convertValues(source["proxy"], domain.ProxyConfig);
 	        this.timeoutMs = source["timeoutMs"];
 	        this.maxEvents = source["maxEvents"];
 	    }
@@ -561,6 +630,7 @@ export namespace realtime {
 	    url: string;
 	    message: string;
 	    headers: domain.KeyValue[];
+	    proxy: domain.ProxyConfig;
 	    timeoutMs: number;
 	
 	    static createFrom(source: any = {}) {
@@ -572,6 +642,7 @@ export namespace realtime {
 	        this.url = source["url"];
 	        this.message = source["message"];
 	        this.headers = this.convertValues(source["headers"], domain.KeyValue);
+	        this.proxy = this.convertValues(source["proxy"], domain.ProxyConfig);
 	        this.timeoutMs = source["timeoutMs"];
 	    }
 	

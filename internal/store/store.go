@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,12 +22,18 @@ type Store struct {
 	db *sql.DB
 }
 
+var executablePath = os.Executable
+var userConfigDir = os.UserConfigDir
+
 func Open(ctx context.Context) (*Store, error) {
 	dir, err := dataDir()
 	if err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	if err := migrateLegacyDatabase(dir); err != nil {
 		return nil, err
 	}
 
@@ -70,11 +77,49 @@ func (s *Store) Close() error {
 }
 
 func dataDir() (string, error) {
-	base, err := os.UserConfigDir()
+	exe, err := executablePath()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "RestDeck"), nil
+	return filepath.Join(filepath.Dir(exe), "Data"), nil
+}
+
+func migrateLegacyDatabase(dir string) error {
+	target := filepath.Join(dir, "restdeck.db")
+	if _, err := os.Stat(target); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	base, err := userConfigDir()
+	if err != nil {
+		return nil
+	}
+	legacy := filepath.Join(base, "RestDeck", "restdeck.db")
+	if _, err := os.Stat(legacy); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	src, err := os.Open(legacy)
+	if err != nil {
+		return fmt.Errorf("open legacy database %q: %w", legacy, err)
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("create data database %q: %w", target, err)
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
+		_ = os.Remove(target)
+		return fmt.Errorf("copy legacy database to Data: %w", err)
+	}
+	if err := dst.Close(); err != nil {
+		_ = os.Remove(target)
+		return err
+	}
+	return nil
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -109,6 +154,7 @@ func (s *Store) migrate(ctx context.Context) error {
 				body TEXT NOT NULL,
 				form_items_json TEXT NOT NULL DEFAULT '[]',
 				auth_json TEXT NOT NULL,
+				proxy_json TEXT NOT NULL DEFAULT '{}',
 				pre_script TEXT NOT NULL,
 				test_script TEXT NOT NULL,
 			timeout_ms INTEGER NOT NULL DEFAULT 30000,
@@ -168,6 +214,9 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "requests", "form_items_json", `TEXT NOT NULL DEFAULT '[]'`); err != nil {
 		return err
 	}
+	if err := s.ensureColumn(ctx, "requests", "proxy_json", `TEXT NOT NULL DEFAULT '{}'`); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -224,6 +273,7 @@ func (s *Store) seed(ctx context.Context) error {
 		Headers:      []domain.KeyValue{{ID: uuid.NewString(), Enabled: true, Key: "Accept", Value: "application/json"}},
 		BodyMode:     domain.BodyModeNone,
 		Auth:         domain.AuthConfig{Type: domain.AuthTypeNone, Values: map[string]string{}},
+		Proxy:        domain.ProxyConfig{Mode: "inherit"},
 		TimeoutMs:    30000,
 		UpdatedAt:    now,
 	}
@@ -263,6 +313,10 @@ func (s *Store) State(ctx context.Context) (domain.WorkspaceState, error) {
 	if err != nil {
 		return domain.WorkspaceState{}, err
 	}
+	settings, err := s.GetSettings(ctx)
+	if err != nil {
+		return domain.WorkspaceState{}, err
+	}
 	active := ""
 	for _, env := range environments {
 		if env.IsActive {
@@ -276,6 +330,7 @@ func (s *Store) State(ctx context.Context) (domain.WorkspaceState, error) {
 		History:             history,
 		Globals:             globals,
 		ActiveEnvironmentID: active,
+		Settings:            settings,
 	}, nil
 }
 
@@ -358,6 +413,7 @@ func (s *Store) SaveRequest(ctx context.Context, r domain.Request) error {
 	if r.Auth.Type == "" {
 		r.Auth = domain.AuthConfig{Type: domain.AuthTypeNone, Values: map[string]string{}}
 	}
+	r.Proxy = normalizeProxy(r.Proxy, "inherit")
 	if r.BodyMode == domain.BodyModeForm {
 		r.FormItems = normalizeFormItems(r.FormItems, r.Body)
 		r.Body = formItemsToBody(r.FormItems)
@@ -377,22 +433,26 @@ func (s *Store) SaveRequest(ctx context.Context, r domain.Request) error {
 	if err != nil {
 		return err
 	}
+	proxyJSON, err := marshal(r.Proxy)
+	if err != nil {
+		return err
+	}
 	formItemsJSON, err := marshal(r.FormItems)
 	if err != nil {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO requests
 		(id, collection_id, parent_id, name, method, url, params_json, headers_json, body_mode, body, form_items_json, auth_json,
-		 pre_script, test_script, timeout_ms, sort_order, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 proxy_json, pre_script, test_script, timeout_ms, sort_order, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET collection_id = excluded.collection_id, parent_id = excluded.parent_id,
 		name = excluded.name, method = excluded.method, url = excluded.url, params_json = excluded.params_json,
 		headers_json = excluded.headers_json, body_mode = excluded.body_mode, body = excluded.body,
 		form_items_json = excluded.form_items_json,
-		auth_json = excluded.auth_json, pre_script = excluded.pre_script, test_script = excluded.test_script,
+		auth_json = excluded.auth_json, proxy_json = excluded.proxy_json, pre_script = excluded.pre_script, test_script = excluded.test_script,
 		timeout_ms = excluded.timeout_ms, sort_order = excluded.sort_order, updated_at = excluded.updated_at`,
 		r.ID, r.CollectionID, r.ParentID, r.Name, r.Method, r.URL, paramsJSON, headersJSON,
-		string(r.BodyMode), r.Body, formItemsJSON, authJSON, r.PreScript, r.TestScript, r.TimeoutMs, r.SortOrder, formatTime(r.UpdatedAt))
+		string(r.BodyMode), r.Body, formItemsJSON, authJSON, proxyJSON, r.PreScript, r.TestScript, r.TimeoutMs, r.SortOrder, formatTime(r.UpdatedAt))
 	return err
 }
 
@@ -432,6 +492,42 @@ func (s *Store) SaveEnvironment(ctx context.Context, env domain.Environment) err
 		env.ID, env.Name, varsJSON, boolInt(env.IsActive), formatTime(env.UpdatedAt))
 	if err != nil {
 		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteEnvironment(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer rollback(tx)
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM environments`).Scan(&total); err != nil {
+		return err
+	}
+	if total <= 1 {
+		return fmt.Errorf("cannot delete the last environment")
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM environments WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("environment %s not found", id)
+	}
+	var activeCount int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM environments WHERE is_active = 1`).Scan(&activeCount); err != nil {
+		return err
+	}
+	if activeCount == 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE environments SET is_active = 1 WHERE id = (SELECT id FROM environments ORDER BY name LIMIT 1)`); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -503,6 +599,83 @@ func (s *Store) ListGlobals(ctx context.Context) ([]domain.KeyValue, error) {
 		items = append(items, kv)
 	}
 	return items, rows.Err()
+}
+
+func (s *Store) GetSettings(ctx context.Context) (domain.Settings, error) {
+	settings := defaultSettings()
+	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM settings`)
+	if err != nil {
+		return domain.Settings{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return domain.Settings{}, err
+		}
+		switch key {
+		case "language":
+			settings.Language = value
+		case "theme":
+			settings.Theme = value
+		case "defaultProxy":
+			_ = json.Unmarshal([]byte(value), &settings.DefaultProxy)
+		}
+	}
+	settings.DefaultProxy = normalizeProxy(settings.DefaultProxy, "none")
+	return settings, rows.Err()
+}
+
+func (s *Store) SaveSettings(ctx context.Context, settings domain.Settings) error {
+	if strings.TrimSpace(settings.Language) == "" {
+		settings.Language = "zh-CN"
+	}
+	if settings.Theme != "dark" {
+		settings.Theme = "light"
+	}
+	settings.DefaultProxy = normalizeProxy(settings.DefaultProxy, "none")
+	proxyJSON, err := marshal(settings.DefaultProxy)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer rollback(tx)
+	for key, value := range map[string]string{
+		"language":     settings.Language,
+		"theme":        settings.Theme,
+		"defaultProxy": proxyJSON,
+	} {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO settings (key, value) VALUES (?, ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) LatestHistoryForRequest(ctx context.Context, requestID string) (domain.HistoryItem, bool, error) {
+	var item domain.HistoryItem
+	var requestJSON, responseJSON, createdAt string
+	err := s.db.QueryRowContext(ctx, `SELECT id, request_id, name, method, url, status_code, duration_ms,
+		request_json, response_json, created_at FROM history WHERE request_id = ? ORDER BY created_at DESC LIMIT 1`, requestID).
+		Scan(&item.ID, &item.RequestID, &item.Name, &item.Method, &item.URL, &item.StatusCode, &item.DurationMs, &requestJSON, &responseJSON, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.HistoryItem{}, false, nil
+	}
+	if err != nil {
+		return domain.HistoryItem{}, false, err
+	}
+	if err := unmarshal(requestJSON, &item.Request); err != nil {
+		return domain.HistoryItem{}, false, err
+	}
+	if err := unmarshal(responseJSON, &item.Response); err != nil {
+		return domain.HistoryItem{}, false, err
+	}
+	item.CreatedAt = parseTime(createdAt)
+	return item, true, nil
 }
 
 func (s *Store) SaveGlobals(ctx context.Context, globals []domain.KeyValue) error {
@@ -620,7 +793,7 @@ func (s *Store) listFolders(ctx context.Context, collectionID string) ([]domain.
 
 func (s *Store) listRequests(ctx context.Context, collectionID string) ([]domain.Request, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, collection_id, parent_id, name, method, url,
-		params_json, headers_json, body_mode, body, form_items_json, auth_json, pre_script, test_script, timeout_ms,
+		params_json, headers_json, body_mode, body, form_items_json, auth_json, proxy_json, pre_script, test_script, timeout_ms,
 		sort_order, updated_at FROM requests WHERE collection_id = ? ORDER BY sort_order, name`, collectionID)
 	if err != nil {
 		return nil, err
@@ -629,9 +802,9 @@ func (s *Store) listRequests(ctx context.Context, collectionID string) ([]domain
 	requests := []domain.Request{}
 	for rows.Next() {
 		var r domain.Request
-		var paramsJSON, headersJSON, formItemsJSON, authJSON, bodyMode, updatedAt string
+		var paramsJSON, headersJSON, formItemsJSON, authJSON, proxyJSON, bodyMode, updatedAt string
 		if err := rows.Scan(&r.ID, &r.CollectionID, &r.ParentID, &r.Name, &r.Method, &r.URL,
-			&paramsJSON, &headersJSON, &bodyMode, &r.Body, &formItemsJSON, &authJSON, &r.PreScript, &r.TestScript,
+			&paramsJSON, &headersJSON, &bodyMode, &r.Body, &formItemsJSON, &authJSON, &proxyJSON, &r.PreScript, &r.TestScript,
 			&r.TimeoutMs, &r.SortOrder, &updatedAt); err != nil {
 			return nil, err
 		}
@@ -644,6 +817,10 @@ func (s *Store) listRequests(ctx context.Context, collectionID string) ([]domain
 		if err := unmarshal(authJSON, &r.Auth); err != nil {
 			return nil, err
 		}
+		if err := unmarshal(proxyJSON, &r.Proxy); err != nil {
+			return nil, err
+		}
+		r.Proxy = normalizeProxy(r.Proxy, "inherit")
 		if err := unmarshal(formItemsJSON, &r.FormItems); err != nil {
 			return nil, err
 		}
@@ -735,6 +912,31 @@ func formItemsToBody(items []domain.FormItem) string {
 		lines = append(lines, item.Key+"="+value)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func defaultSettings() domain.Settings {
+	return domain.Settings{
+		Language:     "zh-CN",
+		Theme:        "light",
+		DefaultProxy: domain.ProxyConfig{Mode: "none"},
+	}
+}
+
+func normalizeProxy(proxy domain.ProxyConfig, fallbackMode string) domain.ProxyConfig {
+	proxy.Mode = strings.TrimSpace(proxy.Mode)
+	proxy.URL = strings.TrimSpace(proxy.URL)
+	switch proxy.Mode {
+	case "inherit", "none", "custom":
+	default:
+		proxy.Mode = fallbackMode
+	}
+	if proxy.Mode == "" {
+		proxy.Mode = fallbackMode
+	}
+	if proxy.Mode != "custom" {
+		proxy.URL = ""
+	}
+	return proxy
 }
 
 func formatTime(t time.Time) string {

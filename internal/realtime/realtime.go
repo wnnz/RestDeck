@@ -18,10 +18,11 @@ import (
 )
 
 type WebSocketRequest struct {
-	URL       string            `json:"url"`
-	Message   string            `json:"message"`
-	Headers   []domain.KeyValue `json:"headers"`
-	TimeoutMs int               `json:"timeoutMs"`
+	URL       string             `json:"url"`
+	Message   string             `json:"message"`
+	Headers   []domain.KeyValue  `json:"headers"`
+	Proxy     domain.ProxyConfig `json:"proxy"`
+	TimeoutMs int                `json:"timeoutMs"`
 }
 
 type WebSocketResult struct {
@@ -33,10 +34,11 @@ type WebSocketResult struct {
 }
 
 type SSERequest struct {
-	URL       string            `json:"url"`
-	Headers   []domain.KeyValue `json:"headers"`
-	TimeoutMs int               `json:"timeoutMs"`
-	MaxEvents int               `json:"maxEvents"`
+	URL       string             `json:"url"`
+	Headers   []domain.KeyValue  `json:"headers"`
+	Proxy     domain.ProxyConfig `json:"proxy"`
+	TimeoutMs int                `json:"timeoutMs"`
+	MaxEvents int                `json:"maxEvents"`
 }
 
 type SSEResult struct {
@@ -52,7 +54,7 @@ func NewService() *Service {
 	return &Service{}
 }
 
-func (s *Service) TestWebSocket(ctx context.Context, input WebSocketRequest, env domain.Environment, globals []domain.KeyValue) WebSocketResult {
+func (s *Service) TestWebSocket(ctx context.Context, input WebSocketRequest, env domain.Environment, globals []domain.KeyValue, defaultProxy domain.ProxyConfig) WebSocketResult {
 	timeout := time.Duration(defaultInt(input.TimeoutMs, 10000)) * time.Millisecond
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -69,6 +71,16 @@ func (s *Service) TestWebSocket(ctx context.Context, input WebSocketRequest, env
 		HandshakeTimeout: timeout,
 		TLSClientConfig:  &tls.Config{MinVersion: tls.VersionTLS12},
 	}
+	effectiveProxy, err := reqsvc.EffectiveProxy(input.Proxy, defaultProxy)
+	if err != nil {
+		return WebSocketResult{DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}
+	}
+	transport, err := reqsvc.HTTPTransportForProxy(effectiveProxy)
+	if err != nil {
+		return WebSocketResult{DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}
+	}
+	dialer.Proxy = transport.Proxy
+	dialer.NetDialContext = transport.DialContext
 	conn, _, err := dialer.DialContext(ctx, resolver.Resolve(input.URL), headers)
 	if err != nil {
 		return WebSocketResult{DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}
@@ -101,7 +113,7 @@ func (s *Service) TestWebSocket(ctx context.Context, input WebSocketRequest, env
 	return result
 }
 
-func (s *Service) TestSSE(ctx context.Context, input SSERequest, env domain.Environment, globals []domain.KeyValue) SSEResult {
+func (s *Service) TestSSE(ctx context.Context, input SSERequest, env domain.Environment, globals []domain.KeyValue, defaultProxy domain.ProxyConfig) SSEResult {
 	timeout := time.Duration(defaultInt(input.TimeoutMs, 10000)) * time.Millisecond
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -123,7 +135,15 @@ func (s *Service) TestSSE(ctx context.Context, input SSERequest, env domain.Envi
 			req.Header.Set(resolver.Resolve(header.Key), resolver.Resolve(header.Value))
 		}
 	}
-	client := http.Client{Timeout: timeout}
+	effectiveProxy, err := reqsvc.EffectiveProxy(input.Proxy, defaultProxy)
+	if err != nil {
+		return SSEResult{DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}
+	}
+	transport, err := reqsvc.HTTPTransportForProxy(effectiveProxy)
+	if err != nil {
+		return SSEResult{DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}
+	}
+	client := http.Client{Timeout: timeout, Transport: transport}
 	res, err := client.Do(req)
 	if err != nil {
 		return SSEResult{DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}

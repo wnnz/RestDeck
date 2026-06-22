@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { tokenizeJSON } from '../utils/jsonHighlight'
+import type { VariableSuggestion } from '../types'
+import VariableSuggestInput from './VariableSuggestInput.vue'
 
 const props = defineProps<{
   modelValue: string
+  suggestions: VariableSuggestion[]
 }>()
 
 const emit = defineEmits<{
@@ -23,14 +26,16 @@ function syncScroll(event: Event) {
 
 <template>
   <div class="json-body-editor">
-    <textarea
-      class="json-body-input"
-      :value="modelValue"
-      spellcheck="false"
+    <VariableSuggestInput
+      input-class="json-body-input"
+      as="textarea"
+      :model-value="modelValue"
+      :suggestions="suggestions"
+      :spellcheck="false"
       placeholder='{"hello": "world"}'
-      @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
+      @update:model-value="emit('update:modelValue', String($event))"
       @scroll="syncScroll"
-    ></textarea>
+    />
     <pre class="json-body-highlight" aria-hidden="true"><span v-for="(token, index) in tokens" :key="index" :class="`json-${token.type}`">{{ token.text }}</span></pre>
   </div>
 </template>

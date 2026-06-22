@@ -3,12 +3,19 @@ package domain
 import "time"
 
 type KeyValue struct {
-	ID          string `json:"id"`
-	Enabled     bool   `json:"enabled"`
-	Key         string `json:"key"`
-	Value       string `json:"value"`
-	Description string `json:"description"`
-	Secret      bool   `json:"secret"`
+	ID                  string `json:"id"`
+	Enabled             bool   `json:"enabled"`
+	Key                 string `json:"key"`
+	Value               string `json:"value"`
+	Description         string `json:"description"`
+	Secret              bool   `json:"secret"`
+	ValueType           string `json:"valueType"`
+	TimestampFormat     string `json:"timestampFormat"`
+	SourceRequestID     string `json:"sourceRequestId"`
+	JSONPath            string `json:"jsonPath"`
+	ResponseStrategy    string `json:"responseStrategy"`
+	RefreshAfterSeconds int    `json:"refreshAfterSeconds"`
+	FallbackValue       string `json:"fallbackValue"`
 }
 
 type FormItem struct {
@@ -48,24 +55,30 @@ type AuthConfig struct {
 	Values map[string]string `json:"values"`
 }
 
+type ProxyConfig struct {
+	Mode string `json:"mode"`
+	URL  string `json:"url"`
+}
+
 type Request struct {
-	ID           string     `json:"id"`
-	CollectionID string     `json:"collectionId"`
-	ParentID     string     `json:"parentId"`
-	Name         string     `json:"name"`
-	Method       string     `json:"method"`
-	URL          string     `json:"url"`
-	Params       []KeyValue `json:"params"`
-	Headers      []KeyValue `json:"headers"`
-	BodyMode     BodyMode   `json:"bodyMode"`
-	Body         string     `json:"body"`
-	FormItems    []FormItem `json:"formItems"`
-	Auth         AuthConfig `json:"auth"`
-	PreScript    string     `json:"preScript"`
-	TestScript   string     `json:"testScript"`
-	TimeoutMs    int        `json:"timeoutMs"`
-	SortOrder    int        `json:"sortOrder"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
+	ID           string      `json:"id"`
+	CollectionID string      `json:"collectionId"`
+	ParentID     string      `json:"parentId"`
+	Name         string      `json:"name"`
+	Method       string      `json:"method"`
+	URL          string      `json:"url"`
+	Params       []KeyValue  `json:"params"`
+	Headers      []KeyValue  `json:"headers"`
+	BodyMode     BodyMode    `json:"bodyMode"`
+	Body         string      `json:"body"`
+	FormItems    []FormItem  `json:"formItems"`
+	Auth         AuthConfig  `json:"auth"`
+	Proxy        ProxyConfig `json:"proxy"`
+	PreScript    string      `json:"preScript"`
+	TestScript   string      `json:"testScript"`
+	TimeoutMs    int         `json:"timeoutMs"`
+	SortOrder    int         `json:"sortOrder"`
+	UpdatedAt    time.Time   `json:"updatedAt"`
 }
 
 type Folder struct {
@@ -157,9 +170,11 @@ type WorkspaceState struct {
 	History             []HistoryItem `json:"history"`
 	Globals             []KeyValue    `json:"globals"`
 	ActiveEnvironmentID string        `json:"activeEnvironmentId"`
+	Settings            Settings      `json:"settings"`
 }
 
 type Settings struct {
-	Language string `json:"language"`
-	Theme    string `json:"theme"`
+	Language     string      `json:"language"`
+	Theme        string      `json:"theme"`
+	DefaultProxy ProxyConfig `json:"defaultProxy"`
 }

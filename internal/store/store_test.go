@@ -1,6 +1,9 @@
 package store
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,6 +53,125 @@ func TestStorePersistsWorkspaceState(t *testing.T) {
 	}
 	if len(state.History) != 1 {
 		t.Fatalf("history length = %d", len(state.History))
+	}
+}
+
+func TestStoreDeletesActiveEnvironmentAndSelectsNext(t *testing.T) {
+	s, err := OpenInMemory(t.Context())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.SaveEnvironment(t.Context(), domain.Environment{ID: "e1", Name: "One", IsActive: true}); err != nil {
+		t.Fatalf("save e1: %v", err)
+	}
+	if err := s.SaveEnvironment(t.Context(), domain.Environment{ID: "e2", Name: "Two"}); err != nil {
+		t.Fatalf("save e2: %v", err)
+	}
+	if err := s.DeleteEnvironment(t.Context(), "e1"); err != nil {
+		t.Fatalf("delete active environment: %v", err)
+	}
+	state, err := s.State(t.Context())
+	if err != nil {
+		t.Fatalf("state: %v", err)
+	}
+	if state.ActiveEnvironmentID != "e2" {
+		t.Fatalf("active environment = %q", state.ActiveEnvironmentID)
+	}
+}
+
+func TestStoreRejectsDeletingLastEnvironment(t *testing.T) {
+	s, err := OpenInMemory(t.Context())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.SaveEnvironment(t.Context(), domain.Environment{ID: "e1", Name: "One", IsActive: true}); err != nil {
+		t.Fatalf("save e1: %v", err)
+	}
+	err = s.DeleteEnvironment(t.Context(), "e1")
+	if err == nil || !strings.Contains(err.Error(), "last environment") {
+		t.Fatalf("delete last environment err = %v", err)
+	}
+}
+
+func TestStorePersistsSettingsAndRequestProxy(t *testing.T) {
+	s, err := OpenInMemory(t.Context())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	settings := domain.Settings{Language: "zh-CN", Theme: "dark", DefaultProxy: domain.ProxyConfig{Mode: "custom", URL: "http://127.0.0.1:7890"}}
+	if err := s.SaveSettings(t.Context(), settings); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	got, err := s.GetSettings(t.Context())
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	if got.DefaultProxy.URL != settings.DefaultProxy.URL || got.Theme != "dark" {
+		t.Fatalf("settings = %#v", got)
+	}
+
+	collection := domain.Collection{ID: "c1", Name: "Demo", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := s.SaveCollection(t.Context(), collection); err != nil {
+		t.Fatalf("save collection: %v", err)
+	}
+	req := domain.Request{ID: "r1", CollectionID: "c1", Name: "Ping", Method: "GET", URL: "https://example.com", Proxy: domain.ProxyConfig{Mode: "none"}}
+	if err := s.SaveRequest(t.Context(), req); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+	state, err := s.State(t.Context())
+	if err != nil {
+		t.Fatalf("state: %v", err)
+	}
+	if state.Collections[0].Requests[0].Proxy.Mode != "none" {
+		t.Fatalf("request proxy = %#v", state.Collections[0].Requests[0].Proxy)
+	}
+}
+
+func TestDataDirUsesExecutableDataFolderAndMigratesLegacyDB(t *testing.T) {
+	oldExecutablePath := executablePath
+	oldUserConfigDir := userConfigDir
+	defer func() {
+		executablePath = oldExecutablePath
+		userConfigDir = oldUserConfigDir
+	}()
+
+	root := t.TempDir()
+	exeDir := filepath.Join(root, "app")
+	configDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(filepath.Join(configDir, "RestDeck"), 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	executablePath = func() (string, error) { return filepath.Join(exeDir, "RestDeck.exe"), nil }
+	userConfigDir = func() (string, error) { return configDir, nil }
+	dir, err := dataDir()
+	if err != nil {
+		t.Fatalf("data dir: %v", err)
+	}
+	if dir != filepath.Join(exeDir, "Data") {
+		t.Fatalf("data dir = %q", dir)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir data: %v", err)
+	}
+	legacy := filepath.Join(configDir, "RestDeck", "restdeck.db")
+	if err := os.WriteFile(legacy, []byte("legacy-db"), 0o644); err != nil {
+		t.Fatalf("write legacy: %v", err)
+	}
+	if err := migrateLegacyDatabase(dir); err != nil {
+		t.Fatalf("migrate legacy: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "restdeck.db"))
+	if err != nil {
+		t.Fatalf("read migrated: %v", err)
+	}
+	if string(data) != "legacy-db" {
+		t.Fatalf("migrated data = %q", data)
 	}
 }
 

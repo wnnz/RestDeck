@@ -3,8 +3,9 @@ import { ref, watch } from 'vue'
 import { CheckCircle2, Clock3, Download, FileJson2, Loader2, Plus, Save, Send, Trash2, Wand2, XCircle } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import JsonBodyEditor from './JsonBodyEditor.vue'
+import VariableSuggestInput from './VariableSuggestInput.vue'
 import type { Translation } from '../i18n/messages'
-import type { JsonToken, RequestTab, ResponseTab, ResponseView } from '../types'
+import type { JsonToken, RequestTab, ResponseTab, ResponseView, VariableSuggestion } from '../types'
 import { formatBytes, responseStatusText, statusClass } from '../utils/format'
 
 const props = defineProps<{
@@ -19,6 +20,7 @@ const props = defineProps<{
   methods: string[]
   authTypes: Array<{ value: string; label: string }>
   bodyModes: Array<{ value: string; label: string }>
+  variableSuggestions: VariableSuggestion[]
   sendRequestAction: () => void | Promise<void>
 }>()
 
@@ -167,7 +169,7 @@ function newFormItem() {
       <select v-model="activeRequest.method" class="method-select">
         <option v-for="method in methods" :key="method" :value="method">{{ method }}</option>
       </select>
-      <input v-model="activeRequest.url" class="url-input" placeholder="https://api.example.com/v1/resource" />
+      <VariableSuggestInput v-model="activeRequest.url" input-class="url-input" :suggestions="variableSuggestions" placeholder="https://api.example.com/v1/resource" />
       <button class="send-btn" :disabled="busy" @click="sendRequest">
         <Loader2 v-if="busy" class="spin" :size="15" />
         <Send v-else :size="15" />
@@ -195,7 +197,7 @@ function newFormItem() {
             <div v-for="(param, index) in activeRequest.params" :key="param.id" class="kv-row">
               <input v-model="param.enabled" type="checkbox" />
               <input v-model="param.key" :placeholder="t.key" />
-              <input v-model="param.value" :placeholder="t.value" />
+              <VariableSuggestInput v-model="param.value" :suggestions="variableSuggestions" :placeholder="t.value" />
               <input v-model="param.description" :placeholder="t.description" />
               <button class="ghost-icon" @click="emit('remove-row', activeRequest!.params, index)"><Trash2 :size="13" /></button>
             </div>
@@ -207,7 +209,7 @@ function newFormItem() {
             <div v-for="(header, index) in activeRequest.headers" :key="header.id" class="kv-row">
               <input v-model="header.enabled" type="checkbox" />
               <input v-model="header.key" :placeholder="t.headers" />
-              <input v-model="header.value" :placeholder="t.value" />
+              <VariableSuggestInput v-model="header.value" :suggestions="variableSuggestions" :placeholder="t.value" />
               <input v-model="header.description" :placeholder="t.description" />
               <button class="ghost-icon" @click="emit('remove-row', activeRequest!.headers, index)"><Trash2 :size="13" /></button>
             </div>
@@ -222,25 +224,25 @@ function newFormItem() {
               </select>
             </label>
             <template v-if="activeRequest.auth?.type === 'apiKey'">
-              <label><span>{{ t.key }}</span><input v-model="activeRequest.auth.values.key" /></label>
-              <label><span>{{ t.value }}</span><input v-model="activeRequest.auth.values.value" type="password" /></label>
+              <label><span>{{ t.key }}</span><VariableSuggestInput v-model="activeRequest.auth.values.key" :suggestions="variableSuggestions" /></label>
+              <label><span>{{ t.value }}</span><VariableSuggestInput v-model="activeRequest.auth.values.value" type="password" :suggestions="variableSuggestions" /></label>
               <label><span>{{ t.addTo }}</span><select v-model="activeRequest.auth.values.in"><option value="header">{{ t.headers }}</option><option value="query">{{ t.params }}</option></select></label>
             </template>
             <template v-else-if="activeRequest.auth?.type === 'bearer'">
-              <label><span>Token</span><input v-model="activeRequest.auth.values.token" type="password" /></label>
+              <label><span>Token</span><VariableSuggestInput v-model="activeRequest.auth.values.token" type="password" :suggestions="variableSuggestions" /></label>
             </template>
             <template v-else-if="activeRequest.auth?.type === 'basic' || activeRequest.auth?.type === 'digest'">
-              <label><span>{{ t.username }}</span><input v-model="activeRequest.auth.values.username" /></label>
-              <label><span>{{ t.password }}</span><input v-model="activeRequest.auth.values.password" type="password" /></label>
+              <label><span>{{ t.username }}</span><VariableSuggestInput v-model="activeRequest.auth.values.username" :suggestions="variableSuggestions" /></label>
+              <label><span>{{ t.password }}</span><VariableSuggestInput v-model="activeRequest.auth.values.password" type="password" :suggestions="variableSuggestions" /></label>
             </template>
             <template v-else-if="activeRequest.auth?.type === 'oauth1'">
-              <label><span>{{ t.consumerKey }}</span><input v-model="activeRequest.auth.values.consumerKey" /></label>
-              <label><span>{{ t.consumerSecret }}</span><input v-model="activeRequest.auth.values.consumerSecret" type="password" /></label>
-              <label><span>Token</span><input v-model="activeRequest.auth.values.token" /></label>
-              <label><span>{{ t.tokenSecret }}</span><input v-model="activeRequest.auth.values.tokenSecret" type="password" /></label>
+              <label><span>{{ t.consumerKey }}</span><VariableSuggestInput v-model="activeRequest.auth.values.consumerKey" :suggestions="variableSuggestions" /></label>
+              <label><span>{{ t.consumerSecret }}</span><VariableSuggestInput v-model="activeRequest.auth.values.consumerSecret" type="password" :suggestions="variableSuggestions" /></label>
+              <label><span>Token</span><VariableSuggestInput v-model="activeRequest.auth.values.token" :suggestions="variableSuggestions" /></label>
+              <label><span>{{ t.tokenSecret }}</span><VariableSuggestInput v-model="activeRequest.auth.values.tokenSecret" type="password" :suggestions="variableSuggestions" /></label>
             </template>
             <template v-else-if="activeRequest.auth?.type === 'oauth2'">
-              <label><span>{{ t.accessToken }}</span><input v-model="activeRequest.auth.values.accessToken" type="password" /></label>
+              <label><span>{{ t.accessToken }}</span><VariableSuggestInput v-model="activeRequest.auth.values.accessToken" type="password" :suggestions="variableSuggestions" /></label>
             </template>
             <p v-else class="muted">{{ t.noAuth }}</p>
           </div>
@@ -258,7 +260,7 @@ function newFormItem() {
                 {{ formEditorMode === 'table' ? t.formViewMode1 : t.formViewMode2 }}
               </button>
             </div>
-            <JsonBodyEditor v-if="activeRequest.bodyMode === 'json'" v-model="activeRequest.body" />
+            <JsonBodyEditor v-if="activeRequest.bodyMode === 'json'" v-model="activeRequest.body" :suggestions="variableSuggestions" />
             <template v-else-if="activeRequest.bodyMode === 'form'">
               <div v-if="formEditorMode === 'table'" class="kv-table form-table">
                 <div class="kv-head form-head"><span></span><span>{{ t.key }}</span><span>{{ t.type }}</span><span>{{ t.value }}</span><span>{{ t.description }}</span><span></span></div>
@@ -270,7 +272,7 @@ function newFormItem() {
                     <option value="file">{{ t.file }}</option>
                   </select>
                   <div class="form-value-cell">
-                    <input v-if="item.type !== 'file'" v-model="item.value" :placeholder="t.value" />
+                    <VariableSuggestInput v-if="item.type !== 'file'" v-model="item.value" :suggestions="variableSuggestions" :placeholder="t.value" />
                     <template v-else>
                       <button class="small-btn" type="button" @click="emit('select-form-file', index)">{{ t.chooseFile }}</button>
                       <span class="file-path" :title="item.filePath">{{ item.filePath }}</span>
@@ -281,22 +283,47 @@ function newFormItem() {
                 </div>
                 <button class="add-row" @click="emit('add-form-item')"><Plus :size="13" /> {{ t.addFormItem }}</button>
               </div>
-              <textarea v-else v-model="activeRequest.body" spellcheck="false" placeholder="name=value&#10;avatar=@D:\path\file.png"></textarea>
+              <VariableSuggestInput v-else v-model="activeRequest.body" as="textarea" :suggestions="variableSuggestions" :spellcheck="false" placeholder="name=value&#10;avatar=@D:\path\file.png" />
             </template>
-            <textarea v-else-if="activeRequest.bodyMode !== 'none'" v-model="activeRequest.body" spellcheck="false" placeholder='{"hello": "world"}'></textarea>
+            <VariableSuggestInput v-else-if="activeRequest.bodyMode !== 'none'" v-model="activeRequest.body" as="textarea" :suggestions="variableSuggestions" :spellcheck="false" placeholder='{"hello": "world"}' />
             <div v-else class="empty-panel">{{ t.noBody }}</div>
           </div>
 
           <div v-else-if="activeRequestTab === 'pre'" class="body-editor">
-            <textarea v-model="activeRequest.preScript" spellcheck="false" placeholder="pm.variables.set('traceId', '{{$guid}}');"></textarea>
+            <VariableSuggestInput v-model="activeRequest.preScript" as="textarea" :suggestions="variableSuggestions" :spellcheck="false" placeholder="pm.variables.set('traceId', '{{$guid}}');" />
           </div>
 
           <div v-else-if="activeRequestTab === 'tests'" class="body-editor">
-            <textarea v-model="activeRequest.testScript" spellcheck="false" placeholder='pm.test("Status is 200", function () { expect(pm.response.code).to.equal(200); });'></textarea>
+            <VariableSuggestInput v-model="activeRequest.testScript" as="textarea" :suggestions="variableSuggestions" :spellcheck="false" placeholder='pm.test("Status is 200", function () { expect(pm.response.code).to.equal(200); });' />
           </div>
 
-          <div v-else class="auth-grid">
-            <label><span>{{ t.timeout }} (ms)</span><input v-model.number="activeRequest.timeoutMs" type="number" min="1000" step="1000" /></label>
+          <div v-else class="settings-sections">
+            <section class="settings-group">
+              <div class="settings-group-title">{{ t.requestSettings }}</div>
+              <div class="settings-fields">
+                <label class="settings-field">
+                  <span>{{ t.timeout }} (ms)</span>
+                  <input v-model.number="activeRequest.timeoutMs" type="number" min="1000" step="1000" />
+                </label>
+              </div>
+            </section>
+            <section class="settings-group">
+              <div class="settings-group-title">{{ t.proxySettings }}</div>
+              <div class="settings-fields">
+                <label class="settings-field">
+                  <span>{{ t.proxyMode }}</span>
+                  <select v-model="activeRequest.proxy.mode">
+                    <option value="inherit">{{ t.proxyInherit }}</option>
+                    <option value="none">{{ t.proxyNone }}</option>
+                    <option value="custom">{{ t.proxyCustom }}</option>
+                  </select>
+                </label>
+                <label v-if="activeRequest.proxy.mode === 'custom'" class="settings-field span-2">
+                  <span>{{ t.proxyUrl }}</span>
+                  <VariableSuggestInput v-model="activeRequest.proxy.url" :suggestions="variableSuggestions" placeholder="http://127.0.0.1:7890" />
+                </label>
+              </div>
+            </section>
           </div>
         </div>
       </section>

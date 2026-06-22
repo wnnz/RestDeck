@@ -117,6 +117,27 @@ func (a *App) SaveEnvironment(env domain.Environment) (domain.WorkspaceState, er
 	return a.GetState()
 }
 
+func (a *App) CreateEnvironment(name string) (domain.WorkspaceState, error) {
+	env := domain.Environment{
+		ID:        uuid.NewString(),
+		Name:      fallback(strings.TrimSpace(name), "New Environment"),
+		IsActive:  true,
+		UpdatedAt: time.Now(),
+		Variables: []domain.KeyValue{},
+	}
+	if err := a.store.SaveEnvironment(a.ctx, env); err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	return a.GetState()
+}
+
+func (a *App) DeleteEnvironment(id string) (domain.WorkspaceState, error) {
+	if err := a.store.DeleteEnvironment(a.ctx, id); err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	return a.GetState()
+}
+
 func (a *App) SetActiveEnvironment(id string) (domain.WorkspaceState, error) {
 	if err := a.store.SetActiveEnvironment(a.ctx, id); err != nil {
 		return domain.WorkspaceState{}, err
@@ -131,6 +152,13 @@ func (a *App) SaveGlobals(globals []domain.KeyValue) (domain.WorkspaceState, err
 	return a.GetState()
 }
 
+func (a *App) SaveSettings(settings domain.Settings) (domain.WorkspaceState, error) {
+	if err := a.store.SaveSettings(a.ctx, settings); err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	return a.GetState()
+}
+
 func (a *App) SendRequest(r domain.Request, environmentID string, globals []domain.KeyValue) (domain.Response, error) {
 	state, err := a.store.State(a.ctx)
 	if err != nil {
@@ -139,19 +167,27 @@ func (a *App) SendRequest(r domain.Request, environmentID string, globals []doma
 	env := findEnvironment(state.Environments, environmentID)
 	r = a.prepareSecrets(r, false)
 	env = a.prepareEnvironmentSecrets(env, false)
-	variables := reqsvc.NewResolver(env, globals).Values()
+	resolver := a.newResolver(env, globals, state.Settings.DefaultProxy)
+	variables, err := resolver.ValuesWithError()
+	if err != nil {
+		return domain.Response{Error: err.Error()}, nil
+	}
 	preResults := a.scripts.RunPreRequest(a.ctx, r.PreScript, r, variables)
-	response, sendErr := a.sender.SendWithVariables(a.ctx, r, variables)
+	response, sendErr := a.sender.SendWithVariablesAndProxy(a.ctx, r, variables, state.Settings.DefaultProxy)
 	tests := a.scripts.RunTests(a.ctx, r.TestScript, r, response, variables)
 	if len(preResults) > 0 {
 		tests = append(preResults, tests...)
 	}
 	response.TestResults = tests
+	historyURL := strings.TrimSpace(response.RequestedURL)
+	if historyURL == "" {
+		historyURL = r.URL
+	}
 	_ = a.store.AddHistory(a.ctx, domain.HistoryItem{
 		RequestID:  r.ID,
 		Name:       r.Name,
 		Method:     r.Method,
-		URL:        r.URL,
+		URL:        historyURL,
 		StatusCode: response.StatusCode,
 		DurationMs: response.DurationMs,
 		Request:    r,
@@ -249,7 +285,7 @@ func (a *App) RunCollection(collectionID, environmentID string, iterations int) 
 	}
 	env := findEnvironment(state.Environments, environmentID)
 	env = a.prepareEnvironmentSecrets(env, false)
-	result := a.runner.Run(a.ctx, collection, env, state.Globals, iterations)
+	result := a.runner.RunWithProxy(a.ctx, collection, env, state.Globals, iterations, state.Settings.DefaultProxy)
 	if err := a.store.AddRunnerResult(a.ctx, result); err != nil {
 		return domain.RunnerResult{}, err
 	}
@@ -259,13 +295,15 @@ func (a *App) RunCollection(collectionID, environmentID string, iterations int) 
 func (a *App) TestWebSocket(input realtime.WebSocketRequest, environmentID string, globals []domain.KeyValue) realtime.WebSocketResult {
 	env := findEnvironmentFromApp(a, environmentID)
 	env = a.prepareEnvironmentSecrets(env, false)
-	return a.realtime.TestWebSocket(a.ctx, input, env, globals)
+	settings, _ := a.store.GetSettings(a.ctx)
+	return a.realtime.TestWebSocket(a.ctx, input, env, globals, settings.DefaultProxy)
 }
 
 func (a *App) TestSSE(input realtime.SSERequest, environmentID string, globals []domain.KeyValue) realtime.SSEResult {
 	env := findEnvironmentFromApp(a, environmentID)
 	env = a.prepareEnvironmentSecrets(env, false)
-	return a.realtime.TestSSE(a.ctx, input, env, globals)
+	settings, _ := a.store.GetSettings(a.ctx)
+	return a.realtime.TestSSE(a.ctx, input, env, globals, settings.DefaultProxy)
 }
 
 func (a *App) FormatBody(contentType, body string) string {
@@ -300,6 +338,46 @@ func (a *App) ensureImportCollection(collectionID string) (domain.Collection, er
 	return collection, nil
 }
 
+func (a *App) newResolver(env domain.Environment, globals []domain.KeyValue, defaultProxy domain.ProxyConfig) *reqsvc.Resolver {
+	return reqsvc.NewResolverWithOptions(env, globals, reqsvc.ResolverOptions{
+		Context: a.ctx,
+		HistoryLookup: func(ctx context.Context, requestID string) (domain.HistoryItem, bool, error) {
+			return a.store.LatestHistoryForRequest(ctx, requestID)
+		},
+		ResponseRefresh: func(ctx context.Context, requestID string, variables map[string]string) (domain.HistoryItem, error) {
+			return a.refreshResponseVariable(ctx, requestID, variables, defaultProxy)
+		},
+	})
+}
+
+func (a *App) refreshResponseVariable(ctx context.Context, requestID string, variables map[string]string, defaultProxy domain.ProxyConfig) (domain.HistoryItem, error) {
+	state, err := a.store.State(ctx)
+	if err != nil {
+		return domain.HistoryItem{}, err
+	}
+	req, ok := findRequest(state.Collections, requestID)
+	if !ok {
+		return domain.HistoryItem{}, fmt.Errorf("request %s not found", requestID)
+	}
+	req = a.prepareSecrets(req, false)
+	response, _ := a.sender.SendWithVariablesAndProxy(ctx, req, variables, defaultProxy)
+	item := domain.HistoryItem{
+		RequestID:  req.ID,
+		Name:       req.Name,
+		Method:     req.Method,
+		URL:        req.URL,
+		StatusCode: response.StatusCode,
+		DurationMs: response.DurationMs,
+		Request:    req,
+		Response:   response,
+		CreatedAt:  time.Now(),
+	}
+	if err := a.store.AddHistory(ctx, item); err != nil {
+		return domain.HistoryItem{}, err
+	}
+	return item, nil
+}
+
 func findCollection(collections []domain.Collection, id string) (domain.Collection, bool) {
 	for _, collection := range collections {
 		if collection.ID == id {
@@ -307,6 +385,17 @@ func findCollection(collections []domain.Collection, id string) (domain.Collecti
 		}
 	}
 	return domain.Collection{}, false
+}
+
+func findRequest(collections []domain.Collection, id string) (domain.Request, bool) {
+	for _, collection := range collections {
+		for _, request := range collection.Requests {
+			if request.ID == id {
+				return request, true
+			}
+		}
+	}
+	return domain.Request{}, false
 }
 
 func findEnvironmentFromApp(a *App, id string) domain.Environment {

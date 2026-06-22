@@ -19,6 +19,10 @@ func NewRunner(sender *Sender, scripts *ScriptRuntime) *Runner {
 }
 
 func (r *Runner) Run(ctx context.Context, collection domain.Collection, env domain.Environment, globals []domain.KeyValue, iterations int) domain.RunnerResult {
+	return r.RunWithProxy(ctx, collection, env, globals, iterations, domain.ProxyConfig{Mode: "none"})
+}
+
+func (r *Runner) RunWithProxy(ctx context.Context, collection domain.Collection, env domain.Environment, globals []domain.KeyValue, iterations int, defaultProxy domain.ProxyConfig) domain.RunnerResult {
 	if iterations <= 0 {
 		iterations = 1
 	}
@@ -35,7 +39,7 @@ func (r *Runner) Run(ctx context.Context, collection domain.Collection, env doma
 	for i := 0; i < iterations; i++ {
 		for _, req := range collection.Requests {
 			preResults := r.scripts.RunPreRequest(ctx, req.PreScript, req, variables)
-			res, err := r.sender.SendWithVariables(ctx, req, variables)
+			res, err := r.sender.SendWithVariablesAndProxy(ctx, req, variables, defaultProxy)
 			if err != nil {
 				item := domain.TestResult{Name: req.Name, Passed: false, Message: err.Error()}
 				result.Items = append(result.Items, item)

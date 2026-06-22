@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { Activity, ChevronDown, CircleAlert, Download, Globe2, Import, Loader2, MoreHorizontal, Pencil, Play, Plus, Radio, X } from 'lucide-vue-next'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { Activity, ChevronDown, CircleAlert, Download, Globe2, Import, Loader2, MoreHorizontal, Pencil, Play, Plus, Radio, Trash2, X } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import type { NavKey } from '../types'
-import { statusClass } from '../utils/format'
 
 defineProps<{
   t: Translation
@@ -15,7 +15,7 @@ defineProps<{
   activeRequest: domain.Request | null
   environments: domain.Environment[]
   activeEnvironment: domain.Environment | null
-  history: domain.HistoryItem[]
+  environmentPanel: 'environment' | 'globals'
   collectionPickerOpen: boolean
   addMenuOpen: boolean
   optionsMenuOpen: boolean
@@ -43,9 +43,18 @@ const emit = defineEmits<{
   openPostmanModal: []
   exportCollection: []
   selectRequest: [request: domain.Request]
+  createEnvironment: []
   selectEnvironment: [id: string]
+  selectGlobalEnvironment: []
+  renameEnvironment: [environment: domain.Environment, name: string]
+  deleteEnvironment: [id: string]
   runCollection: []
 }>()
+
+const environmentMenuId = ref('')
+const editingEnvironmentId = ref('')
+const editingEnvironmentName = ref('')
+const environmentRenameInput = ref<HTMLInputElement | null>(null)
 
 function toggleCollectionPicker(open: boolean) {
   emit('update:collectionPickerOpen', open)
@@ -64,6 +73,75 @@ function toggleOptionsMenu(open: boolean) {
   emit('update:collectionPickerOpen', false)
   emit('update:addMenuOpen', false)
 }
+
+function closeEnvironmentMenu() {
+  environmentMenuId.value = ''
+}
+
+function openEnvironmentMenu(event: MouseEvent, environment: domain.Environment) {
+  event.preventDefault()
+  event.stopPropagation()
+  environmentMenuId.value = environment.id
+}
+
+function selectEnvironment(id: string) {
+  closeEnvironmentMenu()
+  emit('selectEnvironment', id)
+}
+
+function selectGlobalEnvironment() {
+  closeEnvironmentMenu()
+  cancelEditingEnvironment()
+  emit('selectGlobalEnvironment')
+}
+
+function startEditingEnvironment(environment: domain.Environment) {
+  closeEnvironmentMenu()
+  editingEnvironmentId.value = environment.id
+  editingEnvironmentName.value = environment.name
+  emit('selectEnvironment', environment.id)
+  void nextTick(() => {
+    environmentRenameInput.value?.focus()
+    environmentRenameInput.value?.select()
+  })
+}
+
+function setEnvironmentRenameInput(element: unknown) {
+  environmentRenameInput.value = element instanceof HTMLInputElement ? element : null
+}
+
+function cancelEditingEnvironment() {
+  editingEnvironmentId.value = ''
+  editingEnvironmentName.value = ''
+}
+
+function saveEditingEnvironment(environment: domain.Environment) {
+  if (editingEnvironmentId.value !== environment.id) return
+  const nextName = editingEnvironmentName.value.trim()
+  cancelEditingEnvironment()
+  if (!nextName || nextName === environment.name) return
+  emit('renameEnvironment', environment, nextName)
+}
+
+function deleteEnvironment(id: string) {
+  closeEnvironmentMenu()
+  if (editingEnvironmentId.value === id) cancelEditingEnvironment()
+  emit('deleteEnvironment', id)
+}
+
+function handleDocumentClick(event: MouseEvent) {
+  const target = event.target
+  if (target instanceof Element && target.closest('.environment-row-wrap')) return
+  closeEnvironmentMenu()
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleDocumentClick)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleDocumentClick)
+})
 </script>
 
 <template>
@@ -154,6 +232,14 @@ function toggleOptionsMenu(open: boolean) {
         </div>
       </div>
     </template>
+    <template v-else-if="activeNav === 'environments'">
+      <div class="collection-toolbar environment-toolbar">
+        <span class="sidebar-toolbar-title">{{ navLabel }}</span>
+        <button class="icon-btn" type="button" :title="t.newEnvironment" @click="emit('createEnvironment')">
+          <Plus :size="15" />
+        </button>
+      </div>
+    </template>
     <div v-else class="sidebar-title">
       <span>{{ navLabel }}</span>
     </div>
@@ -176,24 +262,53 @@ function toggleOptionsMenu(open: boolean) {
     <template v-else-if="activeNav === 'environments'">
       <div class="request-list">
         <button
-          v-for="env in environments"
-          :key="env.id"
-          :class="['request-row', { active: env.id === activeEnvironment?.id }]"
-          @click="emit('selectEnvironment', env.id)"
+          :class="['request-row', 'environment-row', 'global-environment-row', { active: environmentPanel === 'globals' }]"
+          type="button"
+          @click="selectGlobalEnvironment"
         >
           <Globe2 :size="14" />
-          <span class="truncate">{{ env.name }}</span>
+          <span class="truncate">{{ t.globals }}</span>
+          <span class="environment-special-badge">{{ t.globalScope }}</span>
         </button>
-      </div>
-    </template>
-
-    <template v-else-if="activeNav === 'history'">
-      <div class="request-list">
-        <button v-for="item in history" :key="item.id" class="request-row" @click="emit('selectRequest', item.request)">
-          <span :class="['method', item.method.toLowerCase()]">{{ item.method }}</span>
-          <span class="truncate">{{ item.name || item.url }}</span>
-          <span :class="['history-code', statusClass(item.statusCode)]">{{ item.statusCode || '-' }}</span>
-        </button>
+        <div
+          v-for="env in environments"
+          :key="env.id"
+          class="environment-row-wrap"
+        >
+          <div v-if="editingEnvironmentId === env.id" :class="['request-row', 'environment-row', 'environment-row-editing', { active: environmentPanel === 'environment' && env.id === activeEnvironment?.id }]">
+            <Globe2 :size="14" />
+            <input
+              :ref="setEnvironmentRenameInput"
+              v-model="editingEnvironmentName"
+              class="environment-rename-input"
+              :placeholder="t.environmentName"
+              @click.stop
+              @keydown.enter.prevent="saveEditingEnvironment(env)"
+              @keydown.esc.prevent="cancelEditingEnvironment"
+              @blur="saveEditingEnvironment(env)"
+            />
+          </div>
+          <button
+            v-else
+            :class="['request-row', 'environment-row', { active: environmentPanel === 'environment' && env.id === activeEnvironment?.id }]"
+            type="button"
+            @click="selectEnvironment(env.id)"
+            @contextmenu="openEnvironmentMenu($event, env)"
+          >
+            <Globe2 :size="14" />
+            <span class="truncate">{{ env.name }}</span>
+          </button>
+          <div v-if="environmentMenuId === env.id" class="action-menu environment-menu right" @click.stop>
+            <button type="button" @click="startEditingEnvironment(env)">
+              <Pencil :size="14" />
+              {{ t.rename }}
+            </button>
+            <button class="danger-menu-item" type="button" @click="deleteEnvironment(env.id)">
+              <Trash2 :size="14" />
+              {{ t.delete }}
+            </button>
+          </div>
+        </div>
       </div>
     </template>
 
@@ -216,10 +331,6 @@ function toggleOptionsMenu(open: boolean) {
         <Activity :size="14" />
         <span>SSE</span>
       </button>
-    </template>
-
-    <template v-else>
-      <div class="side-note">{{ t.settingsSide }}</div>
     </template>
   </aside>
 </template>

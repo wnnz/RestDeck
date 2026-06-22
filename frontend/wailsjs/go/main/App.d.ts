@@ -5,7 +5,11 @@ import {realtime} from '../models';
 
 export function CreateCollection(arg1:string):Promise<domain.WorkspaceState>;
 
+export function CreateEnvironment(arg1:string):Promise<domain.WorkspaceState>;
+
 export function DeleteCollection(arg1:string):Promise<domain.WorkspaceState>;
+
+export function DeleteEnvironment(arg1:string):Promise<domain.WorkspaceState>;
 
 export function DeleteRequest(arg1:string):Promise<domain.WorkspaceState>;
 
@@ -30,6 +34,8 @@ export function SaveEnvironment(arg1:domain.Environment):Promise<domain.Workspac
 export function SaveGlobals(arg1:Array<domain.KeyValue>):Promise<domain.WorkspaceState>;
 
 export function SaveRequest(arg1:domain.Request):Promise<domain.WorkspaceState>;
+
+export function SaveSettings(arg1:domain.Settings):Promise<domain.WorkspaceState>;
 
 export function SelectFile():Promise<string>;
 
