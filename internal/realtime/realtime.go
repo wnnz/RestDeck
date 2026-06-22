@@ -71,7 +71,8 @@ func (s *Service) TestWebSocket(ctx context.Context, input WebSocketRequest, env
 		HandshakeTimeout: timeout,
 		TLSClientConfig:  &tls.Config{MinVersion: tls.VersionTLS12},
 	}
-	effectiveProxy, err := reqsvc.EffectiveProxy(input.Proxy, defaultProxy)
+	resolvedURL := resolver.Resolve(input.URL)
+	effectiveProxy, err := reqsvc.EffectiveProxyForURL(input.Proxy, defaultProxy, resolvedURL)
 	if err != nil {
 		return WebSocketResult{DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}
 	}
@@ -81,7 +82,7 @@ func (s *Service) TestWebSocket(ctx context.Context, input WebSocketRequest, env
 	}
 	dialer.Proxy = transport.Proxy
 	dialer.NetDialContext = transport.DialContext
-	conn, _, err := dialer.DialContext(ctx, resolver.Resolve(input.URL), headers)
+	conn, _, err := dialer.DialContext(ctx, resolvedURL, headers)
 	if err != nil {
 		return WebSocketResult{DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}
 	}
@@ -135,7 +136,7 @@ func (s *Service) TestSSE(ctx context.Context, input SSERequest, env domain.Envi
 			req.Header.Set(resolver.Resolve(header.Key), resolver.Resolve(header.Value))
 		}
 	}
-	effectiveProxy, err := reqsvc.EffectiveProxy(input.Proxy, defaultProxy)
+	effectiveProxy, err := reqsvc.EffectiveProxyForURL(input.Proxy, defaultProxy, parsed.String())
 	if err != nil {
 		return SSEResult{DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}
 	}

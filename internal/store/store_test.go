@@ -104,7 +104,7 @@ func TestStorePersistsSettingsAndRequestProxy(t *testing.T) {
 	}
 	defer s.Close()
 
-	settings := domain.Settings{Language: "zh-CN", Theme: "dark", DefaultProxy: domain.ProxyConfig{Mode: "custom", URL: "http://127.0.0.1:7890"}}
+	settings := domain.Settings{Language: "zh-CN", Theme: "dark", DefaultProxy: domain.ProxyConfig{Mode: "custom", URL: "http://127.0.0.1:7890", NoProxy: "localhost 127.0.0.1"}}
 	if err := s.SaveSettings(t.Context(), settings); err != nil {
 		t.Fatalf("save settings: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestStorePersistsSettingsAndRequestProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get settings: %v", err)
 	}
-	if got.DefaultProxy.URL != settings.DefaultProxy.URL || got.Theme != "dark" {
+	if got.DefaultProxy.URL != settings.DefaultProxy.URL || got.DefaultProxy.NoProxy != "localhost,127.0.0.1" || got.Theme != "dark" {
 		t.Fatalf("settings = %#v", got)
 	}
 

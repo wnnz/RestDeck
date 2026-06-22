@@ -58,7 +58,7 @@ func (s *Sender) SendWithVariablesAndProxy(ctx context.Context, req domain.Reque
 	if err != nil {
 		return domain.Response{Error: err.Error()}, err
 	}
-	effectiveProxy, err := EffectiveProxy(req.Proxy, defaultProxy)
+	effectiveProxy, err := EffectiveProxyForURL(req.Proxy, defaultProxy, httpReq.URL.String())
 	if err != nil {
 		return domain.Response{Error: err.Error(), RequestedURL: httpReq.URL.String()}, err
 	}

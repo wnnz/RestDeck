@@ -3,6 +3,7 @@ import { Activity, Loader2, Send } from 'lucide-vue-next'
 import { domain, realtime } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import type { VariableSuggestion } from '../types'
+import CustomSelect from './CustomSelect.vue'
 import VariableSuggestInput from './VariableSuggestInput.vue'
 
 defineProps<{
@@ -20,6 +21,14 @@ const emit = defineEmits<{
   runWebSocket: []
   runSSE: []
 }>()
+
+function proxyModeOptions(t: Translation) {
+  return [
+    { value: 'inherit', label: t.proxyInherit },
+    { value: 'none', label: t.proxyNone },
+    { value: 'custom', label: t.proxyCustom }
+  ]
+}
 </script>
 
 <template>
@@ -39,8 +48,9 @@ const emit = defineEmits<{
       <label class="stack-label inline"><span>URL</span><VariableSuggestInput v-model="wsDraft.url" input-class="field" :suggestions="variableSuggestions" placeholder="wss://echo.websocket.events" /></label>
       <label class="stack-label inline"><span>Message</span><VariableSuggestInput v-model="wsDraft.message" as="textarea" :suggestions="variableSuggestions" :spellcheck="false" /></label>
       <div class="settings-grid compact-grid">
-        <label><span>{{ t.proxyMode }}</span><select v-model="wsDraft.proxy.mode"><option value="inherit">{{ t.proxyInherit }}</option><option value="none">{{ t.proxyNone }}</option><option value="custom">{{ t.proxyCustom }}</option></select></label>
+        <label><span>{{ t.proxyMode }}</span><CustomSelect v-model="wsDraft.proxy.mode" :options="proxyModeOptions(t)" /></label>
         <label v-if="wsDraft.proxy.mode === 'custom'"><span>{{ t.proxyUrl }}</span><VariableSuggestInput v-model="wsDraft.proxy.url" :suggestions="variableSuggestions" placeholder="socks5://127.0.0.1:10808" /></label>
+        <label v-if="wsDraft.proxy.mode === 'custom'"><span>{{ t.proxyNoProxy }}</span><VariableSuggestInput v-model="wsDraft.proxy.noProxy" :suggestions="variableSuggestions" placeholder="localhost,127.0.0.1" /></label>
       </div>
       <div class="result-box">
         <div v-if="!wsResult" class="empty-panel">{{ t.wsEmpty }}</div>
@@ -64,8 +74,9 @@ const emit = defineEmits<{
       </div>
       <label class="stack-label inline"><span>URL</span><VariableSuggestInput v-model="sseDraft.url" input-class="field" :suggestions="variableSuggestions" placeholder="https://example.com/events" /></label>
       <div class="settings-grid compact-grid">
-        <label><span>{{ t.proxyMode }}</span><select v-model="sseDraft.proxy.mode"><option value="inherit">{{ t.proxyInherit }}</option><option value="none">{{ t.proxyNone }}</option><option value="custom">{{ t.proxyCustom }}</option></select></label>
+        <label><span>{{ t.proxyMode }}</span><CustomSelect v-model="sseDraft.proxy.mode" :options="proxyModeOptions(t)" /></label>
         <label v-if="sseDraft.proxy.mode === 'custom'"><span>{{ t.proxyUrl }}</span><VariableSuggestInput v-model="sseDraft.proxy.url" :suggestions="variableSuggestions" placeholder="http://127.0.0.1:7890" /></label>
+        <label v-if="sseDraft.proxy.mode === 'custom'"><span>{{ t.proxyNoProxy }}</span><VariableSuggestInput v-model="sseDraft.proxy.noProxy" :suggestions="variableSuggestions" placeholder="localhost,127.0.0.1" /></label>
         <label><span>{{ t.maxEvents }}</span><input v-model.number="sseDraft.maxEvents" type="number" min="1" max="20" /></label>
         <label><span>{{ t.timeout }} (ms)</span><input v-model.number="sseDraft.timeoutMs" type="number" min="1000" step="1000" /></label>
       </div>

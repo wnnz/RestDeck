@@ -3,6 +3,7 @@ import { Plus, Save, Trash2 } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import type { VariableSuggestion } from '../types'
+import CustomSelect from './CustomSelect.vue'
 import VariableSuggestInput from './VariableSuggestInput.vue'
 
 const props = defineProps<{
@@ -24,9 +25,33 @@ const emit = defineEmits<{
 
 function requestOptions() {
   return (props.collections ?? []).flatMap((collection) => (collection.requests ?? []).map((request) => ({
-    id: request.id,
-    name: `${collection.name} / ${request.name}`
+    value: request.id,
+    label: `${collection.name} / ${request.name}`
   })))
+}
+
+function valueTypeOptions() {
+  return [
+    { value: 'static', label: props.t.staticValue },
+    { value: 'timestamp', label: props.t.timestampValue },
+    { value: 'responseJsonPath', label: props.t.responseJsonPathValue }
+  ]
+}
+
+function timestampOptions() {
+  return [
+    { value: 'seconds', label: props.t.timestampSeconds },
+    { value: 'milliseconds', label: props.t.timestampMilliseconds },
+    { value: 'iso', label: props.t.timestampIso }
+  ]
+}
+
+function responseStrategyOptions() {
+  return [
+    { value: 'latestHistory', label: props.t.latestHistory },
+    { value: 'alwaysRequest', label: props.t.alwaysRequest },
+    { value: 'refreshAfter', label: props.t.refreshAfter }
+  ]
 }
 
 </script>
@@ -49,11 +74,7 @@ function requestOptions() {
       <div v-for="(variable, index) in envDraft.variables" :key="variable.id" class="kv-row variable-row">
         <input v-model="variable.enabled" type="checkbox" />
         <input v-model="variable.key" />
-        <select v-model="variable.valueType">
-          <option value="static">{{ t.staticValue }}</option>
-          <option value="timestamp">{{ t.timestampValue }}</option>
-          <option value="responseJsonPath">{{ t.responseJsonPathValue }}</option>
-        </select>
+        <CustomSelect v-model="variable.valueType" :options="valueTypeOptions()" />
         <div class="variable-value-cell">
           <VariableSuggestInput
             v-if="variable.valueType === 'static'"
@@ -61,22 +82,11 @@ function requestOptions() {
             :type="variable.secret ? 'password' : 'text'"
             :suggestions="variableSuggestions"
           />
-          <select v-else-if="variable.valueType === 'timestamp'" v-model="variable.timestampFormat">
-            <option value="seconds">{{ t.timestampSeconds }}</option>
-            <option value="milliseconds">{{ t.timestampMilliseconds }}</option>
-            <option value="iso">{{ t.timestampIso }}</option>
-          </select>
+          <CustomSelect v-else-if="variable.valueType === 'timestamp'" v-model="variable.timestampFormat" :options="timestampOptions()" />
           <div v-else class="response-var-grid">
-            <select v-model="variable.sourceRequestId">
-              <option value="">{{ t.selectRequest }}</option>
-              <option v-for="request in requestOptions()" :key="request.id" :value="request.id">{{ request.name }}</option>
-            </select>
+            <CustomSelect v-model="variable.sourceRequestId" :options="[{ value: '', label: t.selectRequest }, ...requestOptions()]" />
             <input v-model="variable.jsonPath" placeholder="$.items[0].id" />
-            <select v-model="variable.responseStrategy">
-              <option value="latestHistory">{{ t.latestHistory }}</option>
-              <option value="alwaysRequest">{{ t.alwaysRequest }}</option>
-              <option value="refreshAfter">{{ t.refreshAfter }}</option>
-            </select>
+            <CustomSelect v-model="variable.responseStrategy" :options="responseStrategyOptions()" />
             <input v-if="variable.responseStrategy === 'refreshAfter'" v-model.number="variable.refreshAfterSeconds" type="number" min="1" step="1" />
             <VariableSuggestInput v-model="variable.fallbackValue" :suggestions="variableSuggestions" :placeholder="t.fallbackValue" />
           </div>

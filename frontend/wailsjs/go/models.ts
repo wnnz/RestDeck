@@ -17,6 +17,7 @@ export namespace domain {
 	export class ProxyConfig {
 	    mode: string;
 	    url: string;
+	    noProxy: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProxyConfig(source);
@@ -26,6 +27,7 @@ export namespace domain {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.mode = source["mode"];
 	        this.url = source["url"];
+	        this.noProxy = source["noProxy"];
 	    }
 	}
 	export class FormItem {

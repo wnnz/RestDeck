@@ -92,6 +92,176 @@ textarea {
   font: inherit;
 }
 
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--input-bg);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-strong) 50%),
+    linear-gradient(135deg, var(--muted-strong) 50%, transparent 50%),
+    linear-gradient(to right, transparent, transparent);
+  background-position:
+    calc(100% - 16px) 50%,
+    calc(100% - 11px) 50%,
+    100% 0;
+  background-repeat: no-repeat;
+  background-size: 5px 5px, 5px 5px, 34px 100%;
+  padding-right: 34px !important;
+}
+
+select::-ms-expand {
+  display: none;
+}
+
+select:hover {
+  border-color: var(--border-strong);
+  background-color: var(--panel);
+}
+
+select:focus {
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+select option {
+  background: var(--panel);
+  color: var(--text);
+}
+
+select option:checked {
+  background: linear-gradient(0deg, var(--accent-bg), var(--accent-bg));
+  color: var(--accent-text);
+}
+
+select option:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+.custom-select {
+  position: relative;
+  min-width: 0;
+}
+
+.custom-select-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  min-width: 0;
+  padding: 0 9px;
+  border: 1px solid var(--input-border);
+  border-radius: 5px;
+  background: var(--input-bg);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.custom-select-button:hover {
+  border-color: var(--border-strong);
+  background: var(--panel);
+}
+
+.custom-select.open .custom-select-button,
+.custom-select-button:focus-visible {
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+  outline: none;
+}
+
+.custom-select-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-select-button .placeholder {
+  color: var(--muted-soft);
+}
+
+.custom-select-arrow {
+  flex: 0 0 auto;
+  color: var(--muted-strong);
+  transition: transform 120ms ease;
+}
+
+.custom-select.open .custom-select-arrow {
+  transform: rotate(180deg);
+}
+
+.custom-select.disabled {
+  opacity: 0.6;
+}
+
+.custom-select-menu {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  display: grid;
+  max-height: 260px;
+  min-width: 100%;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 14px 32px var(--shadow);
+}
+
+.custom-select-option {
+  display: grid;
+  gap: 2px;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.custom-select-option:hover,
+.custom-select-option.active {
+  background: var(--hover-bg);
+}
+
+.custom-select-option.selected {
+  background: var(--accent-bg);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+.custom-select-option.selected.active,
+.custom-select-option.selected:hover {
+  background: var(--accent-bg-strong);
+}
+
+.custom-select-option small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-select-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 button {
   color: inherit;
 }
@@ -237,7 +407,7 @@ button {
   min-width: 0;
   border: 1px solid var(--input-border);
   border-radius: 4px;
-  background: var(--panel);
+  background-color: var(--input-bg);
   color: var(--text);
   outline: none;
 }
@@ -460,6 +630,14 @@ button {
   background: var(--panel);
 }
 
+.runner-main-pane {
+  overflow: hidden;
+}
+
+.runner-main-pane > .section-header {
+  flex: 0 0 auto;
+}
+
 .editor-header {
   justify-content: space-between;
   height: 42px;
@@ -499,6 +677,9 @@ button {
 .auth-grid input:focus,
 .auth-grid select:focus,
 .settings-grid select:focus,
+.settings-field input:focus,
+.settings-field select:focus,
+.settings-field .variable-input-wrap > input:focus,
 .body-editor textarea:focus,
 .modal textarea:focus,
 .stack-label input:focus {
@@ -699,7 +880,6 @@ button {
   height: 28px;
   border-color: var(--input-border);
   border-radius: 3px;
-  background: var(--input-bg);
 }
 
 .form-table {
@@ -1355,6 +1535,7 @@ iframe {
   display: grid;
   grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
   gap: 16px;
+  flex: 1;
   min-height: 0;
   padding: 16px;
   overflow: auto;
@@ -1363,6 +1544,7 @@ iframe {
 .runner-config,
 .runner-results {
   min-width: 0;
+  min-height: 0;
 }
 
 .runner-config {
@@ -1373,6 +1555,7 @@ iframe {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel);
+  min-height: 100%;
 }
 
 .runner-card-title {
@@ -1498,8 +1681,86 @@ iframe {
 }
 
 .runner-result-panel {
-  min-height: 420px;
+  min-height: 0;
   margin: 0 !important;
+  overflow: auto;
+}
+
+.runner-queue-row {
+  display: grid;
+  grid-template-columns: 20px 58px minmax(180px, 1.1fr) 86px 70px 82px minmax(160px, 0.8fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 760px;
+  min-height: 38px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.runner-queue-header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  min-height: 32px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.runner-queue-header:hover {
+  background: var(--panel);
+}
+
+.runner-queue-row:hover {
+  background: var(--subtle-bg-2);
+}
+
+.runner-queue-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.runner-queue-main strong,
+.runner-queue-main small,
+.runner-queue-row code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runner-queue-main small,
+.runner-queue-row code {
+  color: var(--muted);
+}
+
+.runner-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--hover-bg);
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.runner-status.running {
+  background: var(--accent-bg);
+  color: var(--accent-text);
+}
+
+.runner-status.passed {
+  background: color-mix(in srgb, #10b981 14%, transparent);
+  color: #059669;
+}
+
+.runner-status.failed {
+  background: color-mix(in srgb, #ef4444 14%, transparent);
+  color: #dc2626;
 }
 
 .settings-note {

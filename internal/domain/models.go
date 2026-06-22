@@ -56,8 +56,9 @@ type AuthConfig struct {
 }
 
 type ProxyConfig struct {
-	Mode string `json:"mode"`
-	URL  string `json:"url"`
+	Mode    string `json:"mode"`
+	URL     string `json:"url"`
+	NoProxy string `json:"noProxy"`
 }
 
 type Request struct {

@@ -3,6 +3,7 @@ import { Moon, Search, Square, Sun, X } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import type { Theme } from '../types'
+import CustomSelect from './CustomSelect.vue'
 
 defineProps<{
   t: Translation
@@ -30,9 +31,13 @@ const emit = defineEmits<{
       <input :value="search" :placeholder="t.search" @input="emit('update:search', ($event.target as HTMLInputElement).value)" />
     </div>
     <div class="top-spacer" />
-    <select class="env-select" :value="activeEnvironment?.id" @dblclick.stop @change="emit('selectEnvironment', ($event.target as HTMLSelectElement).value)">
-      <option v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</option>
-    </select>
+    <CustomSelect
+      button-class="env-select"
+      :model-value="activeEnvironment?.id"
+      :options="environments.map((env) => ({ value: env.id, label: env.name }))"
+      @dblclick.stop
+      @change="emit('selectEnvironment', String($event))"
+    />
     <button type="button" class="top-theme-btn" @dblclick.stop @click="emit('toggleTheme')">
       <Sun v-if="theme === 'dark'" :size="14" />
       <Moon v-else :size="14" />

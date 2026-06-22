@@ -361,11 +361,15 @@ func (a *App) refreshResponseVariable(ctx context.Context, requestID string, var
 	}
 	req = a.prepareSecrets(req, false)
 	response, _ := a.sender.SendWithVariablesAndProxy(ctx, req, variables, defaultProxy)
+	historyURL := strings.TrimSpace(response.RequestedURL)
+	if historyURL == "" {
+		historyURL = req.URL
+	}
 	item := domain.HistoryItem{
 		RequestID:  req.ID,
 		Name:       req.Name,
 		Method:     req.Method,
-		URL:        req.URL,
+		URL:        historyURL,
 		StatusCode: response.StatusCode,
 		DurationMs: response.DurationMs,
 		Request:    req,

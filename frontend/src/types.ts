@@ -12,3 +12,16 @@ export type ResponseStrategy = 'latestHistory' | 'alwaysRequest' | 'refreshAfter
 export type VariableSuggestion = { name: string; detail: string }
 export type JsonTokenType = 'plain' | 'key' | 'string' | 'number' | 'boolean' | 'null' | 'punctuation'
 export type JsonToken = { type: JsonTokenType; text: string }
+export type RunnerItemStatus = 'waiting' | 'running' | 'passed' | 'failed'
+export type RunnerQueueItem = {
+  id: string
+  requestId: string
+  iteration: number
+  method: string
+  name: string
+  url: string
+  status: RunnerItemStatus
+  statusCode?: number
+  durationMs?: number
+  message?: string
+}

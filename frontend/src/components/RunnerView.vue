@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CheckCircle2, Loader2, Play, XCircle } from 'lucide-vue-next'
+import { CheckCircle2, Clock3, Loader2, Play, XCircle } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
+import type { RunnerQueueItem } from '../types'
+import CustomSelect from './CustomSelect.vue'
 
 const props = defineProps<{
   t: Translation
@@ -14,6 +16,7 @@ const props = defineProps<{
   activeEnvironment: domain.Environment | null
   activeCollection: domain.Collection | null
   runnerResult: domain.RunnerResult | null
+  runnerQueue: RunnerQueueItem[]
   runnerBusy: boolean
 }>()
 
@@ -28,18 +31,36 @@ const emit = defineEmits<{
 
 const collectionRequests = computed(() => props.activeCollection?.requests ?? [])
 const selectedRequest = computed(() => collectionRequests.value.find((request) => request.id === props.activeRequestId) ?? collectionRequests.value[0] ?? null)
+const collectionOptions = computed(() => props.collections.map((collection) => ({ value: collection.id, label: collection.name })))
+const requestOptions = computed(() => collectionRequests.value.map((request) => ({ value: request.id, label: `${request.method} ${request.name || request.url}` })))
 const canRunCollection = computed(() => !!props.activeCollection && (props.activeCollection.requests?.length ?? 0) > 0)
 const canRunRequest = computed(() => !!selectedRequest.value)
+const plannedCount = computed(() => props.runnerScope === 'collection' ? (props.activeCollection?.requests?.length ?? 0) * props.runnerIterations : (selectedRequest.value ? 1 : 0))
+const displayQueue = computed(() => props.runnerQueue.length ? props.runnerQueue : previewQueue.value)
+const previewQueue = computed<RunnerQueueItem[]>(() => {
+  const requests = props.runnerScope === 'collection' ? collectionRequests.value : (selectedRequest.value ? [selectedRequest.value] : [])
+  return Array.from({ length: props.runnerScope === 'collection' ? props.runnerIterations : 1 }).flatMap((_, iterationIndex) => requests.map((request) => ({
+    id: `${request.id}-${iterationIndex + 1}`,
+    requestId: request.id,
+    iteration: iterationIndex + 1,
+    method: request.method,
+    name: request.name || request.url,
+    url: request.url,
+    status: 'waiting'
+  })))
+})
+
+function statusLabel(status: RunnerQueueItem['status']) {
+  if (status === 'running') return props.t.running
+  if (status === 'passed') return props.t.passed
+  if (status === 'failed') return props.t.failed
+  return props.t.waiting
+}
 </script>
 
 <template>
   <div class="section-header">
     <div><h2>{{ t.runnerTitle }}</h2><p>{{ t.runnerHelp }}</p></div>
-    <button class="send-btn" :disabled="runnerBusy || (runnerScope === 'collection' ? !canRunCollection : !canRunRequest)" @click="runnerScope === 'collection' ? emit('runCollection') : emit('runRequest')">
-      <Loader2 v-if="runnerBusy" class="spin" :size="15" />
-      <Play v-else :size="15" />
-      {{ t.run }}
-    </button>
   </div>
 
   <div class="runner-layout">
@@ -56,16 +77,12 @@ const canRunRequest = computed(() => !!selectedRequest.value)
 
       <label class="runner-field">
         <span>{{ t.collections }}</span>
-        <select :value="activeCollectionId" @change="emit('selectCollection', ($event.target as HTMLSelectElement).value)">
-          <option v-for="collection in collections" :key="collection.id" :value="collection.id">{{ collection.name }}</option>
-        </select>
+        <CustomSelect :model-value="activeCollectionId" :options="collectionOptions" @change="emit('selectCollection', String($event))" />
       </label>
 
       <label v-if="runnerScope === 'request'" class="runner-field">
         <span>{{ t.request }}</span>
-        <select :value="selectedRequest?.id ?? ''" @change="emit('selectRequest', ($event.target as HTMLSelectElement).value)">
-          <option v-for="request in collectionRequests" :key="request.id" :value="request.id">{{ request.method }} {{ request.name || request.url }}</option>
-        </select>
+        <CustomSelect :model-value="selectedRequest?.id ?? ''" :options="requestOptions" @change="emit('selectRequest', String($event))" />
       </label>
 
       <label v-else class="runner-field">
@@ -75,7 +92,7 @@ const canRunRequest = computed(() => !!selectedRequest.value)
 
       <div class="runner-target-summary">
         <div><span>{{ t.activeEnvironment }}</span><strong>{{ activeEnvironment?.name ?? '-' }}</strong></div>
-        <div><span>{{ t.requestCount }}</span><strong>{{ activeCollection?.requests?.length ?? 0 }}</strong></div>
+        <div><span>{{ t.requestCount }}</span><strong>{{ plannedCount }}</strong></div>
         <div v-if="runnerScope === 'request'"><span>{{ t.requestUrl }}</span><strong>{{ selectedRequest?.url ?? '-' }}</strong></div>
       </div>
 
@@ -93,13 +110,31 @@ const canRunRequest = computed(() => !!selectedRequest.value)
         <div><strong>{{ runnerResult ? `${runnerResult.durationMs} ms` : '-' }}</strong><span>{{ t.duration }}</span></div>
       </div>
       <div class="response-panel standalone runner-result-panel">
-        <div v-for="item in runnerResult?.items ?? []" :key="item.name + item.message" class="test-row">
-          <CheckCircle2 v-if="item.passed" :size="15" class="text-emerald-600" />
-          <XCircle v-else :size="15" class="text-red-600" />
-          <span>{{ item.name }}</span>
-          <code v-if="item.message">{{ item.message }}</code>
+        <div v-if="displayQueue.length" class="runner-queue-row runner-queue-header">
+          <span></span>
+          <span>{{ t.method }}</span>
+          <span>{{ t.request }}</span>
+          <span>{{ t.status }}</span>
+          <span>{{ t.result }}</span>
+          <span>{{ t.duration }}</span>
+          <span>{{ t.description }}</span>
         </div>
-        <div v-if="!runnerResult" class="empty-panel">{{ t.runnerEmpty }}</div>
+        <div v-for="item in displayQueue" :key="item.id" class="runner-queue-row">
+          <CheckCircle2 v-if="item.status === 'passed'" :size="15" class="text-emerald-600" />
+          <XCircle v-else-if="item.status === 'failed'" :size="15" class="text-red-600" />
+          <Loader2 v-else-if="item.status === 'running'" class="spin" :size="15" />
+          <Clock3 v-else :size="15" class="muted" />
+          <span :class="['method', item.method.toLowerCase()]">{{ item.method }}</span>
+          <div class="runner-queue-main">
+            <strong>{{ item.name }}</strong>
+            <small>{{ item.url }}</small>
+          </div>
+          <span :class="['runner-status', item.status]">{{ statusLabel(item.status) }}</span>
+          <code>{{ item.statusCode ? `${item.statusCode}` : '-' }}</code>
+          <span>{{ item.durationMs != null ? `${item.durationMs} ms` : '-' }}</span>
+          <code>{{ item.message || '-' }}</code>
+        </div>
+        <div v-if="!displayQueue.length" class="empty-panel">{{ t.runnerEmpty }}</div>
       </div>
     </section>
   </div>

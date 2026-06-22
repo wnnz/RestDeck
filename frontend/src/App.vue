@@ -21,7 +21,6 @@ import {
   ImportCurlRequest,
   ImportFetchRequest,
   ImportPostmanCollection,
-  RunCollection,
   SaveCollection,
   SaveEnvironment,
   SaveGlobals,
@@ -46,7 +45,7 @@ import SidebarRail from './components/SidebarRail.vue'
 import WorkspaceSidebar from './components/WorkspaceSidebar.vue'
 import { authTypes, bodyModes, methods } from './constants/request'
 import { messages } from './i18n/messages'
-import type { ActiveModal, JsonToken, Language, NavKey, RequestTab, ResponseTab, ResponseView, Theme, VariableSuggestion } from './types'
+import type { ActiveModal, JsonToken, Language, NavKey, RequestTab, ResponseTab, ResponseView, RunnerQueueItem, Theme, VariableSuggestion } from './types'
 import { formatError } from './utils/format'
 import { tokenizeJSON } from './utils/jsonHighlight'
 
@@ -82,17 +81,18 @@ const runnerResult = ref<domain.RunnerResult | null>(null)
 const runnerScope = ref<'collection' | 'request'>('collection')
 const runnerIterations = ref(1)
 const runnerRequestId = ref('')
+const runnerQueue = ref<RunnerQueueItem[]>([])
 const wsDraft = reactive({
   url: 'wss://echo.websocket.events',
   message: '{ "hello": "restdeck" }',
   headers: [] as domain.KeyValue[],
-  proxy: new domain.ProxyConfig({ mode: 'inherit', url: '' }),
+  proxy: new domain.ProxyConfig({ mode: 'inherit', url: '', noProxy: '' }),
   timeoutMs: 10000
 })
 const sseDraft = reactive({
   url: '{{baseUrl}}/sse',
   headers: [] as domain.KeyValue[],
-  proxy: new domain.ProxyConfig({ mode: 'inherit', url: '' }),
+  proxy: new domain.ProxyConfig({ mode: 'inherit', url: '', noProxy: '' }),
   timeoutMs: 10000,
   maxEvents: 5
 })
@@ -105,7 +105,7 @@ const envDraft = reactive({
   variables: [] as domain.KeyValue[]
 })
 const globalsDraft = ref<domain.KeyValue[]>([])
-const settingsDraft = reactive<domain.Settings>(new domain.Settings({ language: 'zh-CN', theme: 'light', defaultProxy: { mode: 'none', url: '' } }))
+const settingsDraft = reactive<domain.Settings>(new domain.Settings({ language: 'zh-CN', theme: 'light', defaultProxy: { mode: 'none', url: '', noProxy: '' } }))
 const t = computed(() => messages[language.value])
 const navItems = computed(() => [
   { key: 'collections' as NavKey, label: t.value.collections, icon: ListTree },
@@ -328,6 +328,22 @@ function selectCollectionById(id: string) {
 
 function selectRunnerRequest(id: string) {
   runnerRequestId.value = id
+  resetRunnerOutput()
+}
+
+function setRunnerScope(scope: 'collection' | 'request') {
+  runnerScope.value = scope
+  resetRunnerOutput()
+}
+
+function setRunnerIterations(iterations: number) {
+  runnerIterations.value = Math.max(1, Math.floor(iterations || 1))
+  resetRunnerOutput()
+}
+
+function resetRunnerOutput() {
+  runnerQueue.value = []
+  runnerResult.value = null
 }
 
 function startEditingCollection(collection: domain.Collection) {
@@ -405,7 +421,7 @@ function createRequest() {
     body: '',
     formItems: [newFormItem()],
     auth: new domain.AuthConfig({ type: 'none', values: {} }),
-    proxy: new domain.ProxyConfig({ mode: 'inherit', url: '' }),
+    proxy: new domain.ProxyConfig({ mode: 'inherit', url: '', noProxy: '' }),
     preScript: '',
     testScript: 'pm.test("Status is successful", function () { expect(pm.response.code).to.be.ok(); });',
     timeoutMs: 30000,
@@ -692,11 +708,24 @@ async function saveSettingsDraft() {
 async function runActiveCollection() {
   const collection = activeCollection.value
   if (!collection) return
+  const iterations = Math.max(1, runnerIterations.value)
+  const requests = collection.requests ?? []
+  const startedAt = Date.now()
   runnerBusy.value = true
-  runnerResult.value = null
   try {
-    runnerResult.value = await RunCollection(collection.id, activeEnvironment.value?.id ?? '', runnerIterations.value)
-    statusMessage.value = `${t.value.runner}: ${runnerResult.value.passed} passed, ${runnerResult.value.failed} failed`
+    runnerQueue.value = buildRunnerQueue(requests, iterations)
+    runnerResult.value = newRunnerResult({
+      collectionId: collection.id,
+      name: collection.name,
+      iterations
+    })
+    for (let iteration = 1; iteration <= iterations; iteration++) {
+      for (const request of requests) {
+        await runRunnerQueueRequest(request, iteration)
+      }
+    }
+    runnerResult.value.durationMs = Date.now() - startedAt
+    statusMessage.value = `${t.value.runner}: ${runnerResult.value.passed} ${t.value.passed}, ${runnerResult.value.failed} ${t.value.failed}`
   } catch (error) {
     statusMessage.value = formatError(error)
   } finally {
@@ -707,44 +736,141 @@ async function runActiveCollection() {
 async function runRunnerRequest() {
   const request = activeCollection.value?.requests?.find((item) => item.id === runnerRequestId.value)
   if (!request) return
-  const requestToSend = normalizeRequest(cloneRequest(request))
-  syncFormBody(requestToSend)
+  const startedAt = Date.now()
   runnerBusy.value = true
-  runnerResult.value = null
   try {
-    statusMessage.value = t.value.sendingRequest
-    const savedState = await SaveRequest(requestToSend)
-    setState(savedState)
-    const start = Date.now()
-    const result = await SendRequest(requestToSend, activeEnvironment.value?.id ?? '', globalsDraft.value)
-    const tests = result.testResults?.length
-      ? result.testResults
-      : [new domain.TestResult({
-        name: requestToSend.name || requestToSend.url,
-        passed: result.statusCode >= 200 && result.statusCode < 400,
-        message: result.error || result.status || `${result.statusCode || '-'}`
-      })]
-    const passed = tests.filter((item) => item.passed).length
-    const failed = tests.length - passed
-    runnerResult.value = new domain.RunnerResult({
-      id: crypto.randomUUID(),
-      collectionId: requestToSend.collectionId,
-      environmentId: activeEnvironment.value?.id ?? '',
-      name: requestToSend.name || requestToSend.url,
-      iterations: 1,
-      passed,
-      failed,
-      durationMs: result.durationMs || Date.now() - start,
-      items: tests,
-      createdAt: new Date()
+    runnerQueue.value = buildRunnerQueue([request], 1)
+    runnerResult.value = newRunnerResult({
+      collectionId: request.collectionId,
+      name: request.name || request.url,
+      iterations: 1
     })
-    const latestState = await GetState()
-    setState(latestState)
-    statusMessage.value = result.error ? result.error : `${t.value.runner}: ${passed} passed, ${failed} failed`
+    await runRunnerQueueRequest(request, 1)
+    runnerResult.value.durationMs = Date.now() - startedAt
+    statusMessage.value = `${t.value.runner}: ${runnerResult.value.passed} ${t.value.passed}, ${runnerResult.value.failed} ${t.value.failed}`
   } catch (error) {
     statusMessage.value = formatError(error)
   } finally {
     runnerBusy.value = false
+  }
+}
+
+function newRunnerResult(input: { collectionId: string; name: string; iterations: number }) {
+  return new domain.RunnerResult({
+    id: crypto.randomUUID(),
+    collectionId: input.collectionId,
+    environmentId: activeEnvironment.value?.id ?? '',
+    name: input.name,
+    iterations: input.iterations,
+    passed: 0,
+    failed: 0,
+    durationMs: 0,
+    items: [],
+    createdAt: new Date().toISOString()
+  })
+}
+
+function buildRunnerQueue(requests: domain.Request[], iterations: number) {
+  return Array.from({ length: iterations }).flatMap((_, iterationIndex) => requests.map((request) => ({
+    id: `${request.id}-${iterationIndex + 1}`,
+    requestId: request.id,
+    iteration: iterationIndex + 1,
+    method: request.method,
+    name: request.name || request.url,
+    url: request.url,
+    status: 'waiting' as const
+  })))
+}
+
+async function runRunnerQueueRequest(request: domain.Request, iteration: number) {
+  const queueId = `${request.id}-${iteration}`
+  updateRunnerQueueItem(queueId, { status: 'running', message: t.value.running })
+  const startedAt = Date.now()
+  let requestToSend = normalizeRequest(cloneRequest(request))
+  try {
+    syncFormBody(requestToSend)
+    statusMessage.value = t.value.sendingRequest
+    const savedState = await SaveRequest(requestToSend)
+    setState(savedState)
+    const result = await SendRequest(requestToSend, activeEnvironment.value?.id ?? '', globalsDraft.value)
+    const summary = summarizeRunnerResponse(result)
+    updateRunnerQueueItem(queueId, {
+      status: summary.passed ? 'passed' : 'failed',
+      url: result.requestedUrl || requestToSend.url,
+      statusCode: result.statusCode,
+      durationMs: result.durationMs,
+      message: summary.message
+    })
+    addRunnerResultItem(requestToSend, summary.passed, summary.message)
+    try {
+      const latestState = await GetState()
+      setState(latestState)
+    } catch (error) {
+      statusMessage.value = formatError(error)
+    }
+  } catch (error) {
+    const message = formatError(error)
+    updateRunnerQueueItem(queueId, {
+      status: 'failed',
+      durationMs: Date.now() - startedAt,
+      message
+    })
+    addRunnerResultItem(requestToSend, false, message)
+  }
+}
+
+function addRunnerResultItem(request: domain.Request, passed: boolean, message: string) {
+  if (!runnerResult.value) return
+  runnerResult.value.passed += passed ? 1 : 0
+  runnerResult.value.failed += passed ? 0 : 1
+  runnerResult.value.items = [
+    ...(runnerResult.value.items ?? []),
+    new domain.TestResult({ name: request.name || request.url, passed, message })
+  ]
+}
+
+function summarizeRunnerResponse(result: domain.Response) {
+  if (result.error) {
+    return { passed: false, message: result.error }
+  }
+  const tests = result.testResults ?? []
+  if (tests.length) {
+    const failedTest = tests.find((item) => !item.passed)
+    if (failedTest) {
+      return {
+        passed: false,
+        message: failedTest.message ? `${failedTest.name}: ${failedTest.message}` : failedTest.name
+      }
+    }
+    return { passed: true, message: `${tests.length} ${t.value.tests}` }
+  }
+  return {
+    passed: result.statusCode >= 200 && result.statusCode < 400,
+    message: result.status || `${result.statusCode || '-'}`
+  }
+}
+
+function updateRunnerQueueItem(id: string, patch: Partial<RunnerQueueItem>) {
+  let updated = false
+  runnerQueue.value = runnerQueue.value.map((item) => {
+    if (item.id !== id) return item
+    updated = true
+    return { ...item, ...patch }
+  })
+  if (!updated) {
+    runnerQueue.value = [
+      ...runnerQueue.value,
+      {
+        id,
+        requestId: id,
+        iteration: 1,
+        method: '-',
+        name: id,
+        url: '',
+        status: 'failed',
+        ...patch
+      }
+    ]
   }
 }
 
@@ -919,7 +1045,20 @@ function normalizeKeyValue(item: domain.KeyValue) {
 
 function normalizeProxy(proxy: domain.ProxyConfig | undefined, fallbackMode: 'inherit' | 'none') {
   const mode = proxy?.mode === 'custom' || proxy?.mode === 'none' || proxy?.mode === 'inherit' ? proxy.mode : fallbackMode
-  return new domain.ProxyConfig({ mode, url: mode === 'custom' ? (proxy?.url ?? '') : '' })
+  return new domain.ProxyConfig({
+    mode,
+    url: mode === 'custom' ? (proxy?.url ?? '') : '',
+    noProxy: mode === 'custom' ? normalizeNoProxy(proxy?.noProxy ?? '') : ''
+  })
+}
+
+function normalizeNoProxy(raw: string) {
+  return raw
+    .split(/[,\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item, index, list) => list.indexOf(item) === index)
+    .join(',')
 }
 
 function normalizeFormItems(items: domain.FormItem[], fallbackBody: string) {
@@ -1039,7 +1178,7 @@ function closeWindow() {
         @delete-environment="deleteEnvironment"
       />
 
-      <section class="main-pane">
+      <section :class="['main-pane', { 'runner-main-pane': activeNav === 'runner' }]">
         <RequestWorkspace
           v-if="activeNav === 'collections'"
           v-model:active-request="activeRequest"
@@ -1104,11 +1243,12 @@ function closeWindow() {
           :active-environment="activeEnvironment"
           :active-collection="activeCollection"
           :runner-result="runnerResult"
+          :runner-queue="runnerQueue"
           :runner-busy="runnerBusy"
           @select-collection="selectCollectionById"
           @select-request="selectRunnerRequest"
-          @set-scope="runnerScope = $event"
-          @set-iterations="runnerIterations = Math.max(1, Math.floor($event || 1))"
+          @set-scope="setRunnerScope"
+          @set-iterations="setRunnerIterations"
           @run-collection="runActiveCollection"
           @run-request="runRunnerRequest"
         />

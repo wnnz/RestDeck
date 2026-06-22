@@ -37,3 +37,32 @@ func TestEffectiveProxyRejectsUnsupportedScheme(t *testing.T) {
 		t.Fatal("expected unsupported proxy scheme")
 	}
 }
+
+func TestEffectiveProxyForURLBypassesNoProxyHosts(t *testing.T) {
+	defaultProxy := domain.ProxyConfig{Mode: "custom", URL: "http://127.0.0.1:7890", NoProxy: "localhost, 127.0.0.1, .internal"}
+	cases := []string{
+		"http://localhost:8080/api",
+		"http://127.0.0.1:8080/api",
+		"https://api.internal/users",
+	}
+	for _, rawURL := range cases {
+		got, err := EffectiveProxyForURL(domain.ProxyConfig{Mode: "inherit"}, defaultProxy, rawURL)
+		if err != nil {
+			t.Fatalf("effective proxy for %s: %v", rawURL, err)
+		}
+		if got.Mode != "none" {
+			t.Fatalf("effective proxy for %s = %#v", rawURL, got)
+		}
+	}
+}
+
+func TestEffectiveProxyForURLUsesProxyWhenNoProxyMisses(t *testing.T) {
+	defaultProxy := domain.ProxyConfig{Mode: "custom", URL: "http://127.0.0.1:7890", NoProxy: "localhost,127.0.0.1"}
+	got, err := EffectiveProxyForURL(domain.ProxyConfig{Mode: "inherit"}, defaultProxy, "https://example.com")
+	if err != nil {
+		t.Fatalf("effective proxy: %v", err)
+	}
+	if got.Mode != "custom" || got.URL != defaultProxy.URL {
+		t.Fatalf("effective proxy = %#v", got)
+	}
+}

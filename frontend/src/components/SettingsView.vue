@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { KeyRound } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import type { Language } from '../types'
+import CustomSelect from './CustomSelect.vue'
 import VariableSuggestInput from './VariableSuggestInput.vue'
 
 defineProps<{
@@ -28,7 +28,7 @@ const emit = defineEmits<{
       <div class="settings-fields">
         <label class="settings-field">
           <span>{{ t.language }}</span>
-          <select v-model="language"><option value="zh-CN">中文</option><option value="en-US">English</option></select>
+          <CustomSelect v-model="language" :options="[{ value: 'zh-CN', label: '中文' }, { value: 'en-US', label: 'English' }]" />
         </label>
       </div>
     </section>
@@ -38,20 +38,16 @@ const emit = defineEmits<{
       <div class="settings-fields">
         <label class="settings-field">
           <span>{{ t.defaultProxy }}</span>
-          <select v-model="settingsDraft.defaultProxy.mode"><option value="none">{{ t.proxyNone }}</option><option value="custom">{{ t.proxyCustom }}</option></select>
+          <CustomSelect v-model="settingsDraft.defaultProxy.mode" :options="[{ value: 'none', label: t.proxyNone }, { value: 'custom', label: t.proxyCustom }]" />
         </label>
         <label v-if="settingsDraft.defaultProxy.mode === 'custom'" class="settings-field">
           <span>{{ t.proxyUrl }}</span>
           <VariableSuggestInput v-model="settingsDraft.defaultProxy.url" placeholder="http://127.0.0.1:7890" :suggestions="[]" />
         </label>
-      </div>
-    </section>
-
-    <section class="settings-group">
-      <div class="settings-group-title">{{ t.securitySettings }}</div>
-      <div class="settings-note">
-        <KeyRound :size="16" />
-        {{ t.encryptedNote }}
+        <label v-if="settingsDraft.defaultProxy.mode === 'custom'" class="settings-field">
+          <span>{{ t.proxyNoProxy }}</span>
+          <VariableSuggestInput v-model="settingsDraft.defaultProxy.noProxy" placeholder="localhost,127.0.0.1" :suggestions="[]" />
+        </label>
       </div>
     </section>
   </div>

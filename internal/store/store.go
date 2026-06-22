@@ -925,6 +925,7 @@ func defaultSettings() domain.Settings {
 func normalizeProxy(proxy domain.ProxyConfig, fallbackMode string) domain.ProxyConfig {
 	proxy.Mode = strings.TrimSpace(proxy.Mode)
 	proxy.URL = strings.TrimSpace(proxy.URL)
+	proxy.NoProxy = normalizeNoProxy(proxy.NoProxy)
 	switch proxy.Mode {
 	case "inherit", "none", "custom":
 	default:
@@ -935,8 +936,26 @@ func normalizeProxy(proxy domain.ProxyConfig, fallbackMode string) domain.ProxyC
 	}
 	if proxy.Mode != "custom" {
 		proxy.URL = ""
+		proxy.NoProxy = ""
 	}
 	return proxy
+}
+
+func normalizeNoProxy(raw string) string {
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+	})
+	out := []string{}
+	seen := map[string]bool{}
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || seen[part] {
+			continue
+		}
+		seen[part] = true
+		out = append(out, part)
+	}
+	return strings.Join(out, ",")
 }
 
 func formatTime(t time.Time) string {

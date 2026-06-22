@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { CheckCircle2, Clock3, Download, FileJson2, Loader2, Plus, Save, Send, Trash2, Wand2, XCircle } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
+import CustomSelect from './CustomSelect.vue'
 import JsonBodyEditor from './JsonBodyEditor.vue'
 import VariableSuggestInput from './VariableSuggestInput.vue'
 import type { Translation } from '../i18n/messages'
@@ -44,6 +45,14 @@ const emit = defineEmits<{
 }>()
 
 const formEditorMode = ref<'table' | 'text'>('table')
+const methodOptions = computed(() => props.methods.map((method) => ({ value: method, label: method })))
+const addToOptions = computed(() => [{ value: 'header', label: props.t.headers }, { value: 'query', label: props.t.params }])
+const formTypeOptions = computed(() => [{ value: 'text', label: props.t.text }, { value: 'file', label: props.t.file }])
+const proxyModeOptions = computed(() => [
+  { value: 'inherit', label: props.t.proxyInherit },
+  { value: 'none', label: props.t.proxyNone },
+  { value: 'custom', label: props.t.proxyCustom }
+])
 
 watch(() => activeRequest.value?.id, () => {
   formEditorMode.value = 'table'
@@ -166,9 +175,7 @@ function newFormItem() {
     </div>
 
     <div class="request-line">
-      <select v-model="activeRequest.method" class="method-select">
-        <option v-for="method in methods" :key="method" :value="method">{{ method }}</option>
-      </select>
+      <CustomSelect v-model="activeRequest.method" button-class="method-select" :options="methodOptions" />
       <VariableSuggestInput v-model="activeRequest.url" input-class="url-input" :suggestions="variableSuggestions" placeholder="https://api.example.com/v1/resource" />
       <button class="send-btn" :disabled="busy" @click="sendRequest">
         <Loader2 v-if="busy" class="spin" :size="15" />
@@ -219,14 +226,12 @@ function newFormItem() {
           <div v-else-if="activeRequestTab === 'auth'" class="auth-grid">
             <label>
               <span>{{ t.type }}</span>
-              <select :value="activeRequest.auth?.type ?? 'none'" @change="emit('set-auth-type', ($event.target as HTMLSelectElement).value)">
-                <option v-for="item in authTypes" :key="item.value" :value="item.value">{{ item.label }}</option>
-              </select>
+              <CustomSelect :model-value="activeRequest.auth?.type ?? 'none'" :options="authTypes" @change="emit('set-auth-type', String($event))" />
             </label>
             <template v-if="activeRequest.auth?.type === 'apiKey'">
               <label><span>{{ t.key }}</span><VariableSuggestInput v-model="activeRequest.auth.values.key" :suggestions="variableSuggestions" /></label>
               <label><span>{{ t.value }}</span><VariableSuggestInput v-model="activeRequest.auth.values.value" type="password" :suggestions="variableSuggestions" /></label>
-              <label><span>{{ t.addTo }}</span><select v-model="activeRequest.auth.values.in"><option value="header">{{ t.headers }}</option><option value="query">{{ t.params }}</option></select></label>
+              <label><span>{{ t.addTo }}</span><CustomSelect v-model="activeRequest.auth.values.in" :options="addToOptions" /></label>
             </template>
             <template v-else-if="activeRequest.auth?.type === 'bearer'">
               <label><span>Token</span><VariableSuggestInput v-model="activeRequest.auth.values.token" type="password" :suggestions="variableSuggestions" /></label>
@@ -249,9 +254,7 @@ function newFormItem() {
 
           <div v-else-if="activeRequestTab === 'body'" class="body-editor">
             <div class="body-toolbar">
-              <select v-model="activeRequest.bodyMode" class="field compact">
-                <option v-for="mode in bodyModes" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
-              </select>
+              <CustomSelect v-model="activeRequest.bodyMode" button-class="field compact" :options="bodyModes" />
               <button v-if="activeRequest.bodyMode === 'json'" class="toolbar-btn" type="button" @click="formatRequestJSON">
                 <Wand2 :size="14" />
                 {{ t.formatJSON }}
@@ -267,10 +270,7 @@ function newFormItem() {
                 <div v-for="(item, index) in activeRequest.formItems" :key="item.id" class="kv-row form-row">
                   <input v-model="item.enabled" type="checkbox" />
                   <input v-model="item.key" :placeholder="t.key" />
-                  <select :value="item.type" @change="setFormItemType(item, ($event.target as HTMLSelectElement).value)">
-                    <option value="text">{{ t.text }}</option>
-                    <option value="file">{{ t.file }}</option>
-                  </select>
+                  <CustomSelect :model-value="item.type" :options="formTypeOptions" @change="setFormItemType(item, String($event))" />
                   <div class="form-value-cell">
                     <VariableSuggestInput v-if="item.type !== 'file'" v-model="item.value" :suggestions="variableSuggestions" :placeholder="t.value" />
                     <template v-else>
@@ -312,15 +312,15 @@ function newFormItem() {
               <div class="settings-fields">
                 <label class="settings-field">
                   <span>{{ t.proxyMode }}</span>
-                  <select v-model="activeRequest.proxy.mode">
-                    <option value="inherit">{{ t.proxyInherit }}</option>
-                    <option value="none">{{ t.proxyNone }}</option>
-                    <option value="custom">{{ t.proxyCustom }}</option>
-                  </select>
+                  <CustomSelect v-model="activeRequest.proxy.mode" :options="proxyModeOptions" />
                 </label>
-                <label v-if="activeRequest.proxy.mode === 'custom'" class="settings-field span-2">
+                <label v-if="activeRequest.proxy.mode === 'custom'" class="settings-field">
                   <span>{{ t.proxyUrl }}</span>
                   <VariableSuggestInput v-model="activeRequest.proxy.url" :suggestions="variableSuggestions" placeholder="http://127.0.0.1:7890" />
+                </label>
+                <label v-if="activeRequest.proxy.mode === 'custom'" class="settings-field">
+                  <span>{{ t.proxyNoProxy }}</span>
+                  <VariableSuggestInput v-model="activeRequest.proxy.noProxy" :suggestions="variableSuggestions" placeholder="localhost,127.0.0.1" />
                 </label>
               </div>
             </section>
