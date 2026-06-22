@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Activity, ChevronDown, CircleAlert, Download, Globe2, Import, Loader2, MoreHorizontal, Pencil, Play, Plus, Radio, Trash2, X } from 'lucide-vue-next'
+import { Activity, ChevronDown, CircleAlert, Download, Globe2, Import, MoreHorizontal, Pencil, Plus, Radio, Trash2, X } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import type { NavKey } from '../types'
@@ -22,7 +22,6 @@ defineProps<{
   editingCollectionId: string
   editingCollectionName: string
   pendingDeleteCollectionId: string
-  runnerBusy: boolean
 }>()
 
 const emit = defineEmits<{
@@ -48,7 +47,6 @@ const emit = defineEmits<{
   selectGlobalEnvironment: []
   renameEnvironment: [environment: domain.Environment, name: string]
   deleteEnvironment: [id: string]
-  runCollection: []
 }>()
 
 const environmentMenuId = ref('')
@@ -310,15 +308,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
-    </template>
-
-    <template v-else-if="activeNav === 'runner'">
-      <div class="side-note">{{ t.runnerHelp }}</div>
-      <button class="primary-wide" :disabled="runnerBusy || !activeCollection" @click="emit('runCollection')">
-        <Loader2 v-if="runnerBusy" class="spin" :size="14" />
-        <Play v-else :size="14" />
-        Run collection
-      </button>
     </template>
 
     <template v-else-if="activeNav === 'realtime'">

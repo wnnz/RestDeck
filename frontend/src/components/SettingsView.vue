@@ -40,7 +40,7 @@ const emit = defineEmits<{
           <span>{{ t.defaultProxy }}</span>
           <select v-model="settingsDraft.defaultProxy.mode"><option value="none">{{ t.proxyNone }}</option><option value="custom">{{ t.proxyCustom }}</option></select>
         </label>
-        <label v-if="settingsDraft.defaultProxy.mode === 'custom'" class="settings-field span-2">
+        <label v-if="settingsDraft.defaultProxy.mode === 'custom'" class="settings-field">
           <span>{{ t.proxyUrl }}</span>
           <VariableSuggestInput v-model="settingsDraft.defaultProxy.url" placeholder="http://127.0.0.1:7890" :suggestions="[]" />
         </label>

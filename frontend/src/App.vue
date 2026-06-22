@@ -79,6 +79,9 @@ const editingCollectionName = ref('')
 const pendingDeleteCollectionId = ref('')
 const exportText = ref('')
 const runnerResult = ref<domain.RunnerResult | null>(null)
+const runnerScope = ref<'collection' | 'request'>('collection')
+const runnerIterations = ref(1)
+const runnerRequestId = ref('')
 const wsDraft = reactive({
   url: 'wss://echo.websocket.events',
   message: '{ "hello": "restdeck" }',
@@ -284,10 +287,14 @@ function setState(next: domain.WorkspaceState) {
       response.value = null
     }
   }
+  if (!runnerRequestId.value || !collection?.requests?.some((request) => request.id === runnerRequestId.value)) {
+    runnerRequestId.value = activeRequest.value?.id ?? collection?.requests?.[0]?.id ?? ''
+  }
 }
 
 function selectRequest(request: domain.Request) {
   activeRequest.value = normalizeRequest(cloneRequest(request))
+  runnerRequestId.value = request.id
   response.value = null
   activeResponseTab.value = 'body'
 }
@@ -308,9 +315,19 @@ async function createCollection() {
 function selectCollection(collection: domain.Collection) {
   activeCollectionId.value = collection.id
   activeRequest.value = collection.requests?.[0] ? normalizeRequest(cloneRequest(collection.requests[0])) : null
+  runnerRequestId.value = activeRequest.value?.id ?? ''
   response.value = null
   collectionPickerOpen.value = false
   pendingDeleteCollectionId.value = ''
+}
+
+function selectCollectionById(id: string) {
+  const collection = state.value?.collections?.find((item) => item.id === id)
+  if (collection) selectCollection(collection)
+}
+
+function selectRunnerRequest(id: string) {
+  runnerRequestId.value = id
 }
 
 function startEditingCollection(collection: domain.Collection) {
@@ -678,8 +695,52 @@ async function runActiveCollection() {
   runnerBusy.value = true
   runnerResult.value = null
   try {
-    runnerResult.value = await RunCollection(collection.id, activeEnvironment.value?.id ?? '', 1)
+    runnerResult.value = await RunCollection(collection.id, activeEnvironment.value?.id ?? '', runnerIterations.value)
     statusMessage.value = `${t.value.runner}: ${runnerResult.value.passed} passed, ${runnerResult.value.failed} failed`
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    runnerBusy.value = false
+  }
+}
+
+async function runRunnerRequest() {
+  const request = activeCollection.value?.requests?.find((item) => item.id === runnerRequestId.value)
+  if (!request) return
+  const requestToSend = normalizeRequest(cloneRequest(request))
+  syncFormBody(requestToSend)
+  runnerBusy.value = true
+  runnerResult.value = null
+  try {
+    statusMessage.value = t.value.sendingRequest
+    const savedState = await SaveRequest(requestToSend)
+    setState(savedState)
+    const start = Date.now()
+    const result = await SendRequest(requestToSend, activeEnvironment.value?.id ?? '', globalsDraft.value)
+    const tests = result.testResults?.length
+      ? result.testResults
+      : [new domain.TestResult({
+        name: requestToSend.name || requestToSend.url,
+        passed: result.statusCode >= 200 && result.statusCode < 400,
+        message: result.error || result.status || `${result.statusCode || '-'}`
+      })]
+    const passed = tests.filter((item) => item.passed).length
+    const failed = tests.length - passed
+    runnerResult.value = new domain.RunnerResult({
+      id: crypto.randomUUID(),
+      collectionId: requestToSend.collectionId,
+      environmentId: activeEnvironment.value?.id ?? '',
+      name: requestToSend.name || requestToSend.url,
+      iterations: 1,
+      passed,
+      failed,
+      durationMs: result.durationMs || Date.now() - start,
+      items: tests,
+      createdAt: new Date()
+    })
+    const latestState = await GetState()
+    setState(latestState)
+    statusMessage.value = result.error ? result.error : `${t.value.runner}: ${passed} passed, ${failed} failed`
   } catch (error) {
     statusMessage.value = formatError(error)
   } finally {
@@ -937,11 +998,11 @@ function closeWindow() {
       @close="closeWindow"
     />
 
-    <main :class="['workspace', { 'workspace-no-sidebar': activeNav === 'history' || activeNav === 'settings' }]">
+    <main :class="['workspace', { 'workspace-no-sidebar': activeNav === 'history' || activeNav === 'runner' || activeNav === 'settings' }]">
       <SidebarRail v-model:active-nav="activeNav" :items="navItems" />
 
       <WorkspaceSidebar
-        v-if="activeNav !== 'history' && activeNav !== 'settings'"
+        v-if="activeNav !== 'history' && activeNav !== 'runner' && activeNav !== 'settings'"
         v-model:collection-picker-open="collectionPickerOpen"
         v-model:add-menu-open="addMenuOpen"
         v-model:options-menu-open="optionsMenuOpen"
@@ -958,7 +1019,6 @@ function closeWindow() {
         :environment-panel="environmentPanel"
         :editing-collection-id="editingCollectionId"
         :pending-delete-collection-id="pendingDeleteCollectionId"
-        :runner-busy="runnerBusy"
         @set-toolbar-ref="collectionToolbarRef = $event"
         @select-collection="selectCollection"
         @start-editing-collection="startEditingCollection"
@@ -977,7 +1037,6 @@ function closeWindow() {
         @select-global-environment="selectGlobalEnvironment"
         @rename-environment="renameEnvironment"
         @delete-environment="deleteEnvironment"
-        @run-collection="runActiveCollection"
       />
 
       <section class="main-pane">
@@ -1037,10 +1096,21 @@ function closeWindow() {
         <RunnerView
           v-else-if="activeNav === 'runner'"
           :t="t"
+          :collections="state?.collections ?? []"
+          :active-collection-id="activeCollectionId"
+          :active-request-id="runnerRequestId"
+          :runner-scope="runnerScope"
+          :runner-iterations="runnerIterations"
+          :active-environment="activeEnvironment"
           :active-collection="activeCollection"
           :runner-result="runnerResult"
           :runner-busy="runnerBusy"
+          @select-collection="selectCollectionById"
+          @select-request="selectRunnerRequest"
+          @set-scope="runnerScope = $event"
+          @set-iterations="runnerIterations = Math.max(1, Math.floor($event || 1))"
           @run-collection="runActiveCollection"
+          @run-request="runRunnerRequest"
         />
 
         <RealtimeView
