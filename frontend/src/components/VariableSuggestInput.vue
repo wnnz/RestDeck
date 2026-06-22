@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { VariableSuggestion } from '../types'
+import VoltInputText from './volt/VoltInputText.vue'
+import VoltTextarea from './volt/VoltTextarea.vue'
+import VoltButton from './volt/VoltButton.vue'
+import VoltPopover from './volt/VoltPopover.vue'
 
 const props = withDefaults(defineProps<{
   modelValue: string | number | undefined
@@ -23,7 +27,8 @@ const emit = defineEmits<{
   scroll: [event: Event]
 }>()
 
-const inputRef = ref<HTMLInputElement | HTMLTextAreaElement | null>(null)
+const inputRef = ref<InstanceType<typeof VoltInputText> | InstanceType<typeof VoltTextarea> | null>(null)
+const suggestPopover = ref<InstanceType<typeof VoltPopover> | null>(null)
 const open = ref(false)
 const query = ref('')
 const selectedIndex = ref(0)
@@ -38,8 +43,36 @@ const filteredSuggestions = computed(() => {
     .slice(0, 9)
 })
 
+watch(open, (next) => {
+  const target = inputElement()
+  if (!next || !target || !filteredSuggestions.value.length) {
+    suggestPopover.value?.hide()
+    return
+  }
+  const event = new Event('variablesuggest')
+  void nextTick(() => suggestPopover.value?.show(event, target))
+})
+
+watch(filteredSuggestions, (items) => {
+  if (!items.length) {
+    suggestPopover.value?.hide()
+    return
+  }
+  if (open.value) {
+    const target = inputElement()
+    if (target) {
+      const event = new Event('variablesuggest')
+      void nextTick(() => suggestPopover.value?.show(event, target))
+    }
+  }
+})
+
 function updateValue(value: string) {
   emit('update:modelValue', props.type === 'number' ? Number(value) : value)
+}
+
+function inputElement() {
+  return inputRef.value?.input ?? null
 }
 
 function handleInput(event: Event) {
@@ -48,7 +81,7 @@ function handleInput(event: Event) {
   updateSuggestionState(target)
 }
 
-function updateSuggestionState(target = inputRef.value) {
+function updateSuggestionState(target = inputElement()) {
   if (!target) return
   const caret = target.selectionStart ?? target.value.length
   const beforeCaret = target.value.slice(0, caret)
@@ -63,7 +96,7 @@ function updateSuggestionState(target = inputRef.value) {
 }
 
 function insertSuggestion(item: VariableSuggestion) {
-  const target = inputRef.value
+  const target = inputElement()
   if (!target) return
   const value = target.value
   const caret = target.selectionStart ?? value.length
@@ -73,6 +106,7 @@ function insertSuggestion(item: VariableSuggestion) {
   const next = `${value.slice(0, trigger)}{{${item.name}}}${value.slice(caret)}`
   updateValue(next)
   open.value = false
+  suggestPopover.value?.hide()
   void nextTick(() => {
     const pos = trigger + item.name.length + 4
     target.focus()
@@ -101,49 +135,52 @@ function handleKeydown(event: KeyboardEvent) {
     }
   } else if (event.key === 'Escape') {
     open.value = false
+    suggestPopover.value?.hide()
   }
 }
 </script>
 
 <template>
   <span :class="['variable-input-wrap', wrapperClass]">
-    <textarea
+    <VoltTextarea
       v-if="as === 'textarea'"
       ref="inputRef"
-      :class="inputClass"
-      :value="modelText"
+      :model-value="modelText"
+      :input-class="inputClass"
       :placeholder="placeholder"
       :spellcheck="spellcheck"
       @blur="open = false"
       @click="updateSuggestionState()"
       @input="handleInput"
+      @update:model-value="updateValue(String($event))"
       @keydown="handleKeydown"
       @scroll="emit('scroll', $event)"
-    ></textarea>
-    <input
+    />
+    <VoltInputText
       v-else
       ref="inputRef"
-      :class="inputClass"
+      :input-class="inputClass"
       :type="type"
-      :value="modelText"
+      :model-value="modelText"
       :placeholder="placeholder"
       :spellcheck="spellcheck"
       @blur="open = false"
       @click="updateSuggestionState()"
       @input="handleInput"
+      @update:model-value="updateValue(String($event))"
       @keydown="handleKeydown"
     />
-    <div v-if="open && filteredSuggestions.length" class="variable-suggest" @mousedown.prevent>
-      <button
+    <VoltPopover ref="suggestPopover" class="variable-suggest-popover" content-class="variable-suggest" @mousedown.prevent>
+      <VoltButton
         v-for="(item, index) in filteredSuggestions"
         :key="item.name"
-        type="button"
         :class="{ active: index === selectedIndex }"
+        variant="ghost"
         @mousedown.prevent="insertSuggestion(item)"
       >
         <strong>{{ item.name }}</strong>
         <span>{{ item.detail }}</span>
-      </button>
-    </div>
+      </VoltButton>
+    </VoltPopover>
   </span>
 </template>

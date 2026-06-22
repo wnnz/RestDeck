@@ -4,7 +4,10 @@ import { CheckCircle2, Clock3, Loader2, Play, XCircle } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import type { RunnerQueueItem } from '../types'
-import CustomSelect from './CustomSelect.vue'
+import VoltSelect from './volt/VoltSelect.vue'
+import VoltButton from './volt/VoltButton.vue'
+import VoltInputText from './volt/VoltInputText.vue'
+import VoltSelectButton from './volt/VoltSelectButton.vue'
 
 const props = defineProps<{
   t: Translation
@@ -36,6 +39,10 @@ const requestOptions = computed(() => collectionRequests.value.map((request) => 
 const canRunCollection = computed(() => !!props.activeCollection && (props.activeCollection.requests?.length ?? 0) > 0)
 const canRunRequest = computed(() => !!selectedRequest.value)
 const plannedCount = computed(() => props.runnerScope === 'collection' ? (props.activeCollection?.requests?.length ?? 0) * props.runnerIterations : (selectedRequest.value ? 1 : 0))
+const scopeOptions = computed(() => [
+  { value: 'collection', label: props.t.runCollection },
+  { value: 'request', label: props.t.runRequest }
+])
 const displayQueue = computed(() => props.runnerQueue.length ? props.runnerQueue : previewQueue.value)
 const previewQueue = computed<RunnerQueueItem[]>(() => {
   const requests = props.runnerScope === 'collection' ? collectionRequests.value : (selectedRequest.value ? [selectedRequest.value] : [])
@@ -70,24 +77,21 @@ function statusLabel(status: RunnerQueueItem['status']) {
         <span>{{ activeEnvironment?.name ?? t.activeEnvironment }}</span>
       </div>
 
-      <div class="runner-scope-toggle">
-        <button :class="{ active: runnerScope === 'collection' }" type="button" @click="emit('setScope', 'collection')">{{ t.runCollection }}</button>
-        <button :class="{ active: runnerScope === 'request' }" type="button" @click="emit('setScope', 'request')">{{ t.runRequest }}</button>
-      </div>
+      <VoltSelectButton class="runner-scope-toggle" :model-value="runnerScope" :options="scopeOptions" @update:model-value="emit('setScope', $event as 'collection' | 'request')" />
 
       <label class="runner-field">
         <span>{{ t.collections }}</span>
-        <CustomSelect :model-value="activeCollectionId" :options="collectionOptions" @change="emit('selectCollection', String($event))" />
+        <VoltSelect :model-value="activeCollectionId" :options="collectionOptions" @change="emit('selectCollection', String($event))" />
       </label>
 
       <label v-if="runnerScope === 'request'" class="runner-field">
         <span>{{ t.request }}</span>
-        <CustomSelect :model-value="selectedRequest?.id ?? ''" :options="requestOptions" @change="emit('selectRequest', String($event))" />
+        <VoltSelect :model-value="selectedRequest?.id ?? ''" :options="requestOptions" @change="emit('selectRequest', String($event))" />
       </label>
 
       <label v-else class="runner-field">
         <span>{{ t.iterations }}</span>
-        <input :value="runnerIterations" min="1" step="1" type="number" @input="emit('setIterations', Number(($event.target as HTMLInputElement).value))" />
+        <VoltInputText :model-value="runnerIterations" type="number" @update:model-value="emit('setIterations', Number($event))" />
       </label>
 
       <div class="runner-target-summary">
@@ -96,11 +100,11 @@ function statusLabel(status: RunnerQueueItem['status']) {
         <div v-if="runnerScope === 'request'"><span>{{ t.requestUrl }}</span><strong>{{ selectedRequest?.url ?? '-' }}</strong></div>
       </div>
 
-      <button class="send-btn runner-run-wide" :disabled="runnerBusy || (runnerScope === 'collection' ? !canRunCollection : !canRunRequest)" @click="runnerScope === 'collection' ? emit('runCollection') : emit('runRequest')">
+      <VoltButton class="send-btn runner-run-wide" :disabled="runnerBusy || (runnerScope === 'collection' ? !canRunCollection : !canRunRequest)" @click="runnerScope === 'collection' ? emit('runCollection') : emit('runRequest')">
         <Loader2 v-if="runnerBusy" class="spin" :size="15" />
         <Play v-else :size="15" />
         {{ runnerScope === 'collection' ? t.runCollection : t.runRequest }}
-      </button>
+      </VoltButton>
     </section>
 
     <section class="runner-results">

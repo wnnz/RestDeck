@@ -3,8 +3,10 @@ import { Activity, Loader2, Send } from 'lucide-vue-next'
 import { domain, realtime } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import type { VariableSuggestion } from '../types'
-import CustomSelect from './CustomSelect.vue'
+import VoltSelect from './volt/VoltSelect.vue'
 import VariableSuggestInput from './VariableSuggestInput.vue'
+import VoltButton from './volt/VoltButton.vue'
+import VoltInputText from './volt/VoltInputText.vue'
 
 defineProps<{
   t: Translation
@@ -39,16 +41,16 @@ function proxyModeOptions(t: Translation) {
     <section class="tool-panel">
       <div class="tool-panel-title">
         <div><strong>WebSocket</strong><span>{{ t.websocketDesc }}</span></div>
-        <button class="send-btn" :disabled="realtimeBusy" @click="emit('runWebSocket')">
+        <VoltButton class="send-btn" :disabled="realtimeBusy" @click="emit('runWebSocket')">
           <Loader2 v-if="realtimeBusy" class="spin" :size="15" />
           <Send v-else :size="15" />
           {{ t.connect }}
-        </button>
+        </VoltButton>
       </div>
       <label class="stack-label inline"><span>URL</span><VariableSuggestInput v-model="wsDraft.url" input-class="field" :suggestions="variableSuggestions" placeholder="wss://echo.websocket.events" /></label>
       <label class="stack-label inline"><span>Message</span><VariableSuggestInput v-model="wsDraft.message" as="textarea" :suggestions="variableSuggestions" :spellcheck="false" /></label>
       <div class="settings-grid compact-grid">
-        <label><span>{{ t.proxyMode }}</span><CustomSelect v-model="wsDraft.proxy.mode" :options="proxyModeOptions(t)" /></label>
+        <label><span>{{ t.proxyMode }}</span><VoltSelect v-model="wsDraft.proxy.mode" :options="proxyModeOptions(t)" /></label>
         <label v-if="wsDraft.proxy.mode === 'custom'"><span>{{ t.proxyUrl }}</span><VariableSuggestInput v-model="wsDraft.proxy.url" :suggestions="variableSuggestions" placeholder="socks5://127.0.0.1:10808" /></label>
         <label v-if="wsDraft.proxy.mode === 'custom'"><span>{{ t.proxyNoProxy }}</span><VariableSuggestInput v-model="wsDraft.proxy.noProxy" :suggestions="variableSuggestions" placeholder="localhost,127.0.0.1" /></label>
       </div>
@@ -66,19 +68,19 @@ function proxyModeOptions(t: Translation) {
     <section class="tool-panel">
       <div class="tool-panel-title">
         <div><strong>SSE</strong><span>{{ t.sseDesc }}</span></div>
-        <button class="send-btn" :disabled="realtimeBusy" @click="emit('runSSE')">
+        <VoltButton class="send-btn" :disabled="realtimeBusy" @click="emit('runSSE')">
           <Loader2 v-if="realtimeBusy" class="spin" :size="15" />
           <Activity v-else :size="15" />
           {{ t.listen }}
-        </button>
+        </VoltButton>
       </div>
       <label class="stack-label inline"><span>URL</span><VariableSuggestInput v-model="sseDraft.url" input-class="field" :suggestions="variableSuggestions" placeholder="https://example.com/events" /></label>
       <div class="settings-grid compact-grid">
-        <label><span>{{ t.proxyMode }}</span><CustomSelect v-model="sseDraft.proxy.mode" :options="proxyModeOptions(t)" /></label>
+        <label><span>{{ t.proxyMode }}</span><VoltSelect v-model="sseDraft.proxy.mode" :options="proxyModeOptions(t)" /></label>
         <label v-if="sseDraft.proxy.mode === 'custom'"><span>{{ t.proxyUrl }}</span><VariableSuggestInput v-model="sseDraft.proxy.url" :suggestions="variableSuggestions" placeholder="http://127.0.0.1:7890" /></label>
         <label v-if="sseDraft.proxy.mode === 'custom'"><span>{{ t.proxyNoProxy }}</span><VariableSuggestInput v-model="sseDraft.proxy.noProxy" :suggestions="variableSuggestions" placeholder="localhost,127.0.0.1" /></label>
-        <label><span>{{ t.maxEvents }}</span><input v-model.number="sseDraft.maxEvents" type="number" min="1" max="20" /></label>
-        <label><span>{{ t.timeout }} (ms)</span><input v-model.number="sseDraft.timeoutMs" type="number" min="1000" step="1000" /></label>
+        <label><span>{{ t.maxEvents }}</span><VoltInputText v-model="sseDraft.maxEvents" type="number" /></label>
+        <label><span>{{ t.timeout }} (ms)</span><VoltInputText v-model="sseDraft.timeoutMs" type="number" /></label>
       </div>
       <div class="result-box">
         <div v-if="!sseResult" class="empty-panel">{{ t.sseEmpty }}</div>

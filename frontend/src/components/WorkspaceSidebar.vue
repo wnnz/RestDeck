@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { Activity, ChevronDown, CircleAlert, Download, Globe2, Import, MoreHorizontal, Pencil, Plus, Radio, Trash2, X } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import type { NavKey } from '../types'
+import VoltButton from './volt/VoltButton.vue'
+import VoltInputText from './volt/VoltInputText.vue'
+import VoltPopover from './volt/VoltPopover.vue'
 
-defineProps<{
+const props = defineProps<{
   t: Translation
   activeNav: NavKey
   navLabel: string
@@ -29,7 +32,6 @@ const emit = defineEmits<{
   'update:addMenuOpen': [value: boolean]
   'update:optionsMenuOpen': [value: boolean]
   'update:editingCollectionName': [value: string]
-  setToolbarRef: [element: HTMLElement | null]
   selectCollection: [collection: domain.Collection]
   startEditingCollection: [collection: domain.Collection]
   cancelEditingCollection: []
@@ -52,34 +54,90 @@ const emit = defineEmits<{
 const environmentMenuId = ref('')
 const editingEnvironmentId = ref('')
 const editingEnvironmentName = ref('')
-const environmentRenameInput = ref<HTMLInputElement | null>(null)
+const environmentRenameInput = ref<InstanceType<typeof VoltInputText> | null>(null)
+const collectionPickerPopover = ref<InstanceType<typeof VoltPopover> | null>(null)
+const addMenuPopover = ref<InstanceType<typeof VoltPopover> | null>(null)
+const optionsMenuPopover = ref<InstanceType<typeof VoltPopover> | null>(null)
+const environmentMenuPopover = ref<InstanceType<typeof VoltPopover> | null>(null)
 
-function toggleCollectionPicker(open: boolean) {
-  emit('update:collectionPickerOpen', open)
+function toggleCollectionPicker(event: Event) {
+  collectionPickerPopover.value?.toggle(event)
   emit('update:addMenuOpen', false)
   emit('update:optionsMenuOpen', false)
+  addMenuPopover.value?.hide()
+  optionsMenuPopover.value?.hide()
 }
 
-function toggleAddMenu(open: boolean) {
-  emit('update:addMenuOpen', open)
+function toggleAddMenu(event: Event) {
+  addMenuPopover.value?.toggle(event)
   emit('update:collectionPickerOpen', false)
   emit('update:optionsMenuOpen', false)
+  collectionPickerPopover.value?.hide()
+  optionsMenuPopover.value?.hide()
 }
 
-function toggleOptionsMenu(open: boolean) {
-  emit('update:optionsMenuOpen', open)
+function toggleOptionsMenu(event: Event) {
+  optionsMenuPopover.value?.toggle(event)
   emit('update:collectionPickerOpen', false)
   emit('update:addMenuOpen', false)
+  collectionPickerPopover.value?.hide()
+  addMenuPopover.value?.hide()
 }
 
 function closeEnvironmentMenu() {
   environmentMenuId.value = ''
+  environmentMenuPopover.value?.hide()
+}
+
+function closeActionMenus() {
+  collectionPickerPopover.value?.hide()
+  addMenuPopover.value?.hide()
+  optionsMenuPopover.value?.hide()
+  emit('update:collectionPickerOpen', false)
+  emit('update:addMenuOpen', false)
+  emit('update:optionsMenuOpen', false)
+}
+
+function selectCollection(collection: domain.Collection) {
+  collectionPickerPopover.value?.hide()
+  emit('selectCollection', collection)
+}
+
+function createCollection() {
+  collectionPickerPopover.value?.hide()
+  emit('createCollection')
+}
+
+function createRequest() {
+  closeActionMenus()
+  emit('createRequest')
+}
+
+function openFetchModal() {
+  closeActionMenus()
+  emit('openFetchModal')
+}
+
+function openCurlModal() {
+  closeActionMenus()
+  emit('openCurlModal')
+}
+
+function openPostmanModal() {
+  closeActionMenus()
+  emit('openPostmanModal')
+}
+
+function exportCollection() {
+  closeActionMenus()
+  emit('exportCollection')
 }
 
 function openEnvironmentMenu(event: MouseEvent, environment: domain.Environment) {
   event.preventDefault()
   event.stopPropagation()
   environmentMenuId.value = environment.id
+  void nextTick(() => environmentMenuPopover.value?.show(event))
 }
 
 function selectEnvironment(id: string) {
@@ -99,13 +157,9 @@ function startEditingEnvironment(environment: domain.Environment) {
   editingEnvironmentName.value = environment.name
   emit('selectEnvironment', environment.id)
   void nextTick(() => {
-    environmentRenameInput.value?.focus()
-    environmentRenameInput.value?.select()
+    environmentRenameInput.value?.input?.focus()
+    environmentRenameInput.value?.input?.select()
   })
-}
-
-function setEnvironmentRenameInput(element: unknown) {
-  environmentRenameInput.value = element instanceof HTMLInputElement ? element : null
 }
 
 function cancelEditingEnvironment() {
@@ -127,105 +181,109 @@ function deleteEnvironment(id: string) {
   emit('deleteEnvironment', id)
 }
 
-function handleDocumentClick(event: MouseEvent) {
-  const target = event.target
-  if (target instanceof Element && target.closest('.environment-row-wrap')) return
-  closeEnvironmentMenu()
-}
-
-onMounted(() => {
-  document.addEventListener('click', handleDocumentClick)
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('click', handleDocumentClick)
-})
 </script>
 
 <template>
   <aside class="sidebar">
     <template v-if="activeNav === 'collections'">
-      <div :ref="(element) => emit('setToolbarRef', element as HTMLElement | null)" class="collection-toolbar">
+      <div class="collection-toolbar">
         <div class="collection-picker-wrap">
-          <button class="collection-link" type="button" @click="toggleCollectionPicker(!collectionPickerOpen)">
+          <VoltButton class="collection-link" variant="ghost" @click="toggleCollectionPicker">
             <span class="truncate">{{ activeCollection?.name ?? t.collections }}</span>
             <ChevronDown :size="13" />
-          </button>
-          <div v-if="collectionPickerOpen" class="collection-dropdown">
+          </VoltButton>
+          <VoltPopover
+            ref="collectionPickerPopover"
+            class="collection-dropdown-popover"
+            content-class="collection-dropdown"
+            @hide="emit('update:collectionPickerOpen', false)"
+            @show="emit('update:collectionPickerOpen', true)"
+          >
             <div class="collection-dropdown-list">
               <div
                 v-for="collection in collections"
                 :key="collection.id"
                 :class="['collection-option', { active: collection.id === activeCollection?.id }]"
               >
-                <input
+                <VoltInputText
                   v-if="editingCollectionId === collection.id"
-                  :value="editingCollectionName"
+                  :model-value="editingCollectionName"
                   class="collection-rename-input"
                   :placeholder="t.collectionName"
-                  @input="emit('update:editingCollectionName', ($event.target as HTMLInputElement).value)"
+                  @update:model-value="emit('update:editingCollectionName', String($event))"
                   @keydown.enter="emit('saveEditingCollection', collection)"
                   @keydown.esc="emit('cancelEditingCollection')"
                   @blur="emit('saveEditingCollection', collection)"
                 />
-                <button v-else class="collection-option-name" type="button" @click="emit('selectCollection', collection)">
+                <VoltButton v-else class="collection-option-name" variant="ghost" @click="selectCollection(collection)">
                   <span class="truncate">{{ collection.name }}</span>
-                </button>
-                <button class="ghost-icon" type="button" :title="t.editCollection" @click.stop="emit('startEditingCollection', collection)">
+                </VoltButton>
+                <VoltButton class="ghost-icon" size="icon" variant="ghost" :title="t.editCollection" @click.stop="emit('startEditingCollection', collection)">
                   <Pencil :size="13" />
-                </button>
-                <button
+                </VoltButton>
+                <VoltButton
                   :class="['ghost-icon', 'danger-icon', { pending: pendingDeleteCollectionId === collection.id }]"
-                  type="button"
+                  size="icon"
+                  variant="ghost"
                   :title="pendingDeleteCollectionId === collection.id ? t.confirmDeleteCollection : t.deleteCollection"
                   @click.stop="emit('deleteCollection', collection)"
                 >
                   <CircleAlert v-if="pendingDeleteCollectionId === collection.id" :size="13" />
                   <X v-else :size="13" />
-                </button>
+                </VoltButton>
               </div>
             </div>
-            <button class="collection-new-option" type="button" @click="emit('createCollection')">
+            <VoltButton class="collection-new-option" variant="ghost" @click="createCollection">
               <Plus :size="14" />
               {{ t.newCollection }}
-            </button>
-          </div>
+            </VoltButton>
+          </VoltPopover>
         </div>
 
         <div class="collection-actions">
           <div class="menu-wrap">
-            <button class="icon-btn" type="button" :title="t.new" @click="toggleAddMenu(!addMenuOpen)">
+            <VoltButton class="icon-btn" size="icon" variant="ghost" :title="t.new" @click="toggleAddMenu">
               <Plus :size="15" />
-            </button>
-            <div v-if="addMenuOpen" class="action-menu">
-              <button type="button" @click="emit('createRequest')">
+            </VoltButton>
+            <VoltPopover
+              ref="addMenuPopover"
+              content-class="action-menu"
+              @hide="emit('update:addMenuOpen', false)"
+              @show="emit('update:addMenuOpen', true)"
+            >
+              <VoltButton variant="ghost" @click="createRequest">
                 <Plus :size="14" />
                 {{ t.newRequest }}
-              </button>
-              <button type="button" @click="emit('openFetchModal')">
+              </VoltButton>
+              <VoltButton variant="ghost" @click="openFetchModal">
                 <Import :size="14" />
                 {{ t.importFromFetch }}
-              </button>
-              <button type="button" @click="emit('openCurlModal')">
+              </VoltButton>
+              <VoltButton variant="ghost" @click="openCurlModal">
                 <Import :size="14" />
                 {{ t.importFromCurl }}
-              </button>
-            </div>
+              </VoltButton>
+            </VoltPopover>
           </div>
           <div class="menu-wrap">
-            <button class="icon-btn" type="button" :title="t.collectionOptions" @click="toggleOptionsMenu(!optionsMenuOpen)">
+            <VoltButton class="icon-btn" size="icon" variant="ghost" :title="t.collectionOptions" @click="toggleOptionsMenu">
               <MoreHorizontal :size="14" />
-            </button>
-            <div v-if="optionsMenuOpen" class="action-menu right">
-              <button type="button" @click="emit('openPostmanModal')">
+            </VoltButton>
+            <VoltPopover
+              ref="optionsMenuPopover"
+              content-class="action-menu"
+              @hide="emit('update:optionsMenuOpen', false)"
+              @show="emit('update:optionsMenuOpen', true)"
+            >
+              <VoltButton variant="ghost" @click="openPostmanModal">
                 <Import :size="14" />
                 {{ t.importFromPostman }}
-              </button>
-              <button type="button" :disabled="!activeCollection" @click="emit('exportCollection')">
+              </VoltButton>
+              <VoltButton variant="ghost" :disabled="!activeCollection" @click="exportCollection">
                 <Download :size="14" />
                 {{ t.export }}
-              </button>
-            </div>
+              </VoltButton>
+            </VoltPopover>
           </div>
         </div>
       </div>
@@ -233,9 +291,9 @@ onBeforeUnmount(() => {
     <template v-else-if="activeNav === 'environments'">
       <div class="collection-toolbar environment-toolbar">
         <span class="sidebar-toolbar-title">{{ navLabel }}</span>
-        <button class="icon-btn" type="button" :title="t.newEnvironment" @click="emit('createEnvironment')">
+        <VoltButton class="icon-btn" size="icon" variant="ghost" :title="t.newEnvironment" @click="emit('createEnvironment')">
           <Plus :size="15" />
-        </button>
+        </VoltButton>
       </div>
     </template>
     <div v-else class="sidebar-title">
@@ -244,7 +302,7 @@ onBeforeUnmount(() => {
 
     <template v-if="activeNav === 'collections'">
       <div class="request-list">
-        <button
+        <VoltButton
           v-for="request in filteredRequests"
           :key="request.id"
           :class="['request-row', { active: request.id === activeRequest?.id }]"
@@ -252,22 +310,22 @@ onBeforeUnmount(() => {
         >
           <span :class="['method', request.method.toLowerCase()]">{{ request.method }}</span>
           <span class="truncate">{{ request.name }}</span>
-        </button>
+        </VoltButton>
         <div v-if="!activeCollection" class="side-note">{{ t.createOrSelect }}</div>
       </div>
     </template>
 
     <template v-else-if="activeNav === 'environments'">
       <div class="request-list">
-        <button
+        <VoltButton
           :class="['request-row', 'environment-row', 'global-environment-row', { active: environmentPanel === 'globals' }]"
-          type="button"
+          variant="ghost"
           @click="selectGlobalEnvironment"
         >
           <Globe2 :size="14" />
           <span class="truncate">{{ t.globals }}</span>
           <span class="environment-special-badge">{{ t.globalScope }}</span>
-        </button>
+        </VoltButton>
         <div
           v-for="env in environments"
           :key="env.id"
@@ -275,8 +333,8 @@ onBeforeUnmount(() => {
         >
           <div v-if="editingEnvironmentId === env.id" :class="['request-row', 'environment-row', 'environment-row-editing', { active: environmentPanel === 'environment' && env.id === activeEnvironment?.id }]">
             <Globe2 :size="14" />
-            <input
-              :ref="setEnvironmentRenameInput"
+            <VoltInputText
+              ref="environmentRenameInput"
               v-model="editingEnvironmentName"
               class="environment-rename-input"
               :placeholder="t.environmentName"
@@ -286,40 +344,45 @@ onBeforeUnmount(() => {
               @blur="saveEditingEnvironment(env)"
             />
           </div>
-          <button
+          <VoltButton
             v-else
             :class="['request-row', 'environment-row', { active: environmentPanel === 'environment' && env.id === activeEnvironment?.id }]"
-            type="button"
+            variant="ghost"
             @click="selectEnvironment(env.id)"
             @contextmenu="openEnvironmentMenu($event, env)"
           >
             <Globe2 :size="14" />
             <span class="truncate">{{ env.name }}</span>
-          </button>
-          <div v-if="environmentMenuId === env.id" class="action-menu environment-menu right" @click.stop>
-            <button type="button" @click="startEditingEnvironment(env)">
+          </VoltButton>
+          <VoltPopover
+            v-if="environmentMenuId === env.id"
+            ref="environmentMenuPopover"
+            content-class="action-menu environment-menu"
+            @hide="environmentMenuId = ''"
+          >
+            <VoltButton variant="ghost" @click="startEditingEnvironment(env)">
               <Pencil :size="14" />
               {{ t.rename }}
-            </button>
-            <button class="danger-menu-item" type="button" @click="deleteEnvironment(env.id)">
+            </VoltButton>
+            <VoltButton class="danger-menu-item" variant="ghost" @click="deleteEnvironment(env.id)">
               <Trash2 :size="14" />
               {{ t.delete }}
-            </button>
-          </div>
+            </VoltButton>
+          </VoltPopover>
         </div>
       </div>
     </template>
 
     <template v-else-if="activeNav === 'realtime'">
       <div class="side-note">{{ t.realtimeHelp }}</div>
-      <button class="request-row active" type="button">
+      <VoltButton class="request-row active" variant="ghost">
         <Radio :size="14" />
         <span>WebSocket</span>
-      </button>
-      <button class="request-row" type="button">
+      </VoltButton>
+      <VoltButton class="request-row" variant="ghost">
         <Activity :size="14" />
         <span>SSE</span>
-      </button>
+      </VoltButton>
     </template>
   </aside>
 </template>

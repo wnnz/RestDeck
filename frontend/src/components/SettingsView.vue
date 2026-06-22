@@ -2,8 +2,9 @@
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import type { Language } from '../types'
-import CustomSelect from './CustomSelect.vue'
+import VoltSelect from './volt/VoltSelect.vue'
 import VariableSuggestInput from './VariableSuggestInput.vue'
+import VoltButton from './volt/VoltButton.vue'
 
 defineProps<{
   t: Translation
@@ -20,7 +21,7 @@ const emit = defineEmits<{
 <template>
   <div class="section-header">
     <div><h2>{{ t.settings }}</h2><p>{{ t.settingsHelp }}</p></div>
-    <button class="toolbar-btn" @click="emit('saveSettings')">{{ t.save }}</button>
+    <VoltButton class="toolbar-btn" @click="emit('saveSettings')">{{ t.save }}</VoltButton>
   </div>
   <div class="settings-sections">
     <section class="settings-group">
@@ -28,7 +29,7 @@ const emit = defineEmits<{
       <div class="settings-fields">
         <label class="settings-field">
           <span>{{ t.language }}</span>
-          <CustomSelect v-model="language" :options="[{ value: 'zh-CN', label: '中文' }, { value: 'en-US', label: 'English' }]" />
+          <VoltSelect v-model="language" :options="[{ value: 'zh-CN', label: '中文' }, { value: 'en-US', label: 'English' }]" />
         </label>
       </div>
     </section>
@@ -38,7 +39,7 @@ const emit = defineEmits<{
       <div class="settings-fields">
         <label class="settings-field">
           <span>{{ t.defaultProxy }}</span>
-          <CustomSelect v-model="settingsDraft.defaultProxy.mode" :options="[{ value: 'none', label: t.proxyNone }, { value: 'custom', label: t.proxyCustom }]" />
+          <VoltSelect v-model="settingsDraft.defaultProxy.mode" :options="[{ value: 'none', label: t.proxyNone }, { value: 'custom', label: t.proxyCustom }]" />
         </label>
         <label v-if="settingsDraft.defaultProxy.mode === 'custom'" class="settings-field">
           <span>{{ t.proxyUrl }}</span>

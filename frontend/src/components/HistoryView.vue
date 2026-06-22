@@ -2,6 +2,7 @@
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import { statusClass } from '../utils/format'
+import VoltButton from './volt/VoltButton.vue'
 
 defineProps<{
   t: Translation
@@ -21,11 +22,11 @@ function historyURL(item: domain.HistoryItem) {
   <div class="section-header"><div><h2>{{ t.history }}</h2></div></div>
   <div class="history-table">
     <div class="history-head"><span>METHOD</span><span>{{ t.requestUrl }}</span><span>{{ t.status }}</span><span>{{ t.duration }}</span></div>
-    <button v-for="item in history" :key="item.id" class="history-line" @click="emit('selectRequest', item.request)">
+    <VoltButton v-for="item in history" :key="item.id" class="history-line" variant="ghost" @click="emit('selectRequest', item.request)">
       <span :class="['method', item.method.toLowerCase()]">{{ item.method }}</span>
       <span class="truncate">{{ historyURL(item) }}</span>
       <span :class="statusClass(item.statusCode)">{{ item.statusCode || '-' }}</span>
       <span>{{ item.durationMs }} ms</span>
-    </button>
+    </VoltButton>
   </div>
 </template>

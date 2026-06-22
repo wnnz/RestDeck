@@ -3,7 +3,9 @@ import { Moon, Search, Square, Sun, X } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import type { Theme } from '../types'
-import CustomSelect from './CustomSelect.vue'
+import VoltSelect from './volt/VoltSelect.vue'
+import VoltButton from './volt/VoltButton.vue'
+import VoltInputText from './volt/VoltInputText.vue'
 
 defineProps<{
   t: Translation
@@ -28,31 +30,31 @@ const emit = defineEmits<{
     <div class="window-title">RestDeck</div>
     <div class="top-search" @dblclick.stop>
       <Search :size="14" />
-      <input :value="search" :placeholder="t.search" @input="emit('update:search', ($event.target as HTMLInputElement).value)" />
+      <VoltInputText input-class="top-search-input" :model-value="search" :placeholder="t.search" @update:model-value="emit('update:search', String($event))" />
     </div>
     <div class="top-spacer" />
-    <CustomSelect
-      button-class="env-select"
+    <VoltSelect
+      class="env-select"
       :model-value="activeEnvironment?.id"
       :options="environments.map((env) => ({ value: env.id, label: env.name }))"
       @dblclick.stop
       @change="emit('selectEnvironment', String($event))"
     />
-    <button type="button" class="top-theme-btn" @dblclick.stop @click="emit('toggleTheme')">
+    <VoltButton class="top-theme-btn" size="sm" @dblclick.stop @click="emit('toggleTheme')">
       <Sun v-if="theme === 'dark'" :size="14" />
       <Moon v-else :size="14" />
       {{ theme === 'dark' ? t.light : t.dark }}
-    </button>
+    </VoltButton>
     <div class="window-controls" @dblclick.stop>
-      <button type="button" class="window-control" title="Minimize" @click="emit('minimize')">
+      <VoltButton class="window-control" title="Minimize" variant="ghost" @click="emit('minimize')">
         <span class="minimize-mark"></span>
-      </button>
-      <button type="button" class="window-control" title="Maximize" @click="emit('toggleMaximize')">
+      </VoltButton>
+      <VoltButton class="window-control" title="Maximize" variant="ghost" @click="emit('toggleMaximize')">
         <Square :size="11" :stroke-width="1.7" />
-      </button>
-      <button type="button" class="window-control close" title="Close" @click="emit('close')">
+      </VoltButton>
+      <VoltButton class="window-control close" title="Close" variant="ghost" @click="emit('close')">
         <X :size="14" :stroke-width="1.7" />
-      </button>
+      </VoltButton>
     </div>
   </header>
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   Globe2,
   History,
@@ -43,11 +43,24 @@ import RunnerView from './components/RunnerView.vue'
 import SettingsView from './components/SettingsView.vue'
 import SidebarRail from './components/SidebarRail.vue'
 import WorkspaceSidebar from './components/WorkspaceSidebar.vue'
+import { useRunnerController } from './composables/useRunnerController'
 import { authTypes, bodyModes, methods } from './constants/request'
 import { messages } from './i18n/messages'
-import type { ActiveModal, JsonToken, Language, NavKey, RequestTab, ResponseTab, ResponseView, RunnerQueueItem, Theme, VariableSuggestion } from './types'
+import type { ActiveModal, JsonToken, Language, NavKey, RequestTab, ResponseTab, ResponseView, Theme, VariableSuggestion } from './types'
 import { formatError } from './utils/format'
 import { tokenizeJSON } from './utils/jsonHighlight'
+import {
+  authBadgeCount,
+  cloneKeyValues,
+  cloneRequest,
+  defaultAuthValues,
+  newFormItem,
+  newKeyValue,
+  normalizeKeyValue,
+  normalizeProxy,
+  normalizeRequest,
+  syncFormBody
+} from './utils/requestModel'
 
 const state = ref<domain.WorkspaceState | null>(null)
 const language = ref<Language>((localStorage.getItem('restdeck.language') as Language) || 'zh-CN')
@@ -62,7 +75,6 @@ const activeRequest = ref<domain.Request | null>(null)
 const response = ref<domain.Response | null>(null)
 const search = ref('')
 const busy = ref(false)
-const runnerBusy = ref(false)
 const realtimeBusy = ref(false)
 const statusMessage = ref('')
 const activeModal = ref<ActiveModal>(null)
@@ -72,16 +84,10 @@ const curlText = ref('')
 const collectionPickerOpen = ref(false)
 const addMenuOpen = ref(false)
 const optionsMenuOpen = ref(false)
-const collectionToolbarRef = ref<HTMLElement | null>(null)
 const editingCollectionId = ref('')
 const editingCollectionName = ref('')
 const pendingDeleteCollectionId = ref('')
 const exportText = ref('')
-const runnerResult = ref<domain.RunnerResult | null>(null)
-const runnerScope = ref<'collection' | 'request'>('collection')
-const runnerIterations = ref(1)
-const runnerRequestId = ref('')
-const runnerQueue = ref<RunnerQueueItem[]>([])
 const wsDraft = reactive({
   url: 'wss://echo.websocket.events',
   message: '{ "hello": "restdeck" }',
@@ -138,6 +144,32 @@ const activeModalTitle = computed(() => {
 const activeEnvironment = computed(() => {
   const envs = state.value?.environments ?? []
   return envs.find((item) => item.id === state.value?.activeEnvironmentId) ?? envs.find((item) => item.isActive) ?? envs[0] ?? null
+})
+
+const {
+  runnerBusy,
+  runnerResult,
+  runnerScope,
+  runnerIterations,
+  runnerRequestId,
+  runnerQueue,
+  ensureRunnerRequest,
+  setRunnerRequest,
+  selectRunnerRequest,
+  setRunnerScope,
+  setRunnerIterations,
+  runActiveCollection,
+  runRunnerRequest
+} = useRunnerController({
+  activeCollection,
+  activeEnvironment,
+  globalsDraft,
+  labels: t,
+  statusMessage,
+  saveRequest: SaveRequest,
+  sendRequest: SendRequest,
+  getState: GetState,
+  setState
 })
 
 const filteredRequests = computed(() => {
@@ -219,12 +251,7 @@ const variableSuggestions = computed<VariableSuggestion[]>(() => {
 onMounted(async () => {
   settingsDraft.language = language.value
   settingsDraft.theme = theme.value
-  document.addEventListener('click', handleDocumentClick, true)
   await loadState()
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('click', handleDocumentClick, true)
 })
 
 watch(language, (next) => {
@@ -287,14 +314,12 @@ function setState(next: domain.WorkspaceState) {
       response.value = null
     }
   }
-  if (!runnerRequestId.value || !collection?.requests?.some((request) => request.id === runnerRequestId.value)) {
-    runnerRequestId.value = activeRequest.value?.id ?? collection?.requests?.[0]?.id ?? ''
-  }
+  ensureRunnerRequest(activeRequest.value?.id ?? '')
 }
 
 function selectRequest(request: domain.Request) {
   activeRequest.value = normalizeRequest(cloneRequest(request))
-  runnerRequestId.value = request.id
+  setRunnerRequest(request.id)
   response.value = null
   activeResponseTab.value = 'body'
 }
@@ -315,7 +340,7 @@ async function createCollection() {
 function selectCollection(collection: domain.Collection) {
   activeCollectionId.value = collection.id
   activeRequest.value = collection.requests?.[0] ? normalizeRequest(cloneRequest(collection.requests[0])) : null
-  runnerRequestId.value = activeRequest.value?.id ?? ''
+  setRunnerRequest(activeRequest.value?.id ?? '')
   response.value = null
   collectionPickerOpen.value = false
   pendingDeleteCollectionId.value = ''
@@ -324,26 +349,6 @@ function selectCollection(collection: domain.Collection) {
 function selectCollectionById(id: string) {
   const collection = state.value?.collections?.find((item) => item.id === id)
   if (collection) selectCollection(collection)
-}
-
-function selectRunnerRequest(id: string) {
-  runnerRequestId.value = id
-  resetRunnerOutput()
-}
-
-function setRunnerScope(scope: 'collection' | 'request') {
-  runnerScope.value = scope
-  resetRunnerOutput()
-}
-
-function setRunnerIterations(iterations: number) {
-  runnerIterations.value = Math.max(1, Math.floor(iterations || 1))
-  resetRunnerOutput()
-}
-
-function resetRunnerOutput() {
-  runnerQueue.value = []
-  runnerResult.value = null
 }
 
 function startEditingCollection(collection: domain.Collection) {
@@ -603,14 +608,6 @@ function closeCollectionMenus() {
   optionsMenuOpen.value = false
 }
 
-function handleDocumentClick(event: MouseEvent) {
-  if (!collectionPickerOpen.value && !addMenuOpen.value && !optionsMenuOpen.value) return
-  const target = event.target
-  if (target instanceof Node && collectionToolbarRef.value?.contains(target)) return
-  closeCollectionMenus()
-  pendingDeleteCollectionId.value = ''
-}
-
 async function saveEnvironmentDraft() {
   const env = new domain.Environment({
     id: envDraft.id,
@@ -705,175 +702,6 @@ async function saveSettingsDraft() {
   }
 }
 
-async function runActiveCollection() {
-  const collection = activeCollection.value
-  if (!collection) return
-  const iterations = Math.max(1, runnerIterations.value)
-  const requests = collection.requests ?? []
-  const startedAt = Date.now()
-  runnerBusy.value = true
-  try {
-    runnerQueue.value = buildRunnerQueue(requests, iterations)
-    runnerResult.value = newRunnerResult({
-      collectionId: collection.id,
-      name: collection.name,
-      iterations
-    })
-    for (let iteration = 1; iteration <= iterations; iteration++) {
-      for (const request of requests) {
-        await runRunnerQueueRequest(request, iteration)
-      }
-    }
-    runnerResult.value.durationMs = Date.now() - startedAt
-    statusMessage.value = `${t.value.runner}: ${runnerResult.value.passed} ${t.value.passed}, ${runnerResult.value.failed} ${t.value.failed}`
-  } catch (error) {
-    statusMessage.value = formatError(error)
-  } finally {
-    runnerBusy.value = false
-  }
-}
-
-async function runRunnerRequest() {
-  const request = activeCollection.value?.requests?.find((item) => item.id === runnerRequestId.value)
-  if (!request) return
-  const startedAt = Date.now()
-  runnerBusy.value = true
-  try {
-    runnerQueue.value = buildRunnerQueue([request], 1)
-    runnerResult.value = newRunnerResult({
-      collectionId: request.collectionId,
-      name: request.name || request.url,
-      iterations: 1
-    })
-    await runRunnerQueueRequest(request, 1)
-    runnerResult.value.durationMs = Date.now() - startedAt
-    statusMessage.value = `${t.value.runner}: ${runnerResult.value.passed} ${t.value.passed}, ${runnerResult.value.failed} ${t.value.failed}`
-  } catch (error) {
-    statusMessage.value = formatError(error)
-  } finally {
-    runnerBusy.value = false
-  }
-}
-
-function newRunnerResult(input: { collectionId: string; name: string; iterations: number }) {
-  return new domain.RunnerResult({
-    id: crypto.randomUUID(),
-    collectionId: input.collectionId,
-    environmentId: activeEnvironment.value?.id ?? '',
-    name: input.name,
-    iterations: input.iterations,
-    passed: 0,
-    failed: 0,
-    durationMs: 0,
-    items: [],
-    createdAt: new Date().toISOString()
-  })
-}
-
-function buildRunnerQueue(requests: domain.Request[], iterations: number) {
-  return Array.from({ length: iterations }).flatMap((_, iterationIndex) => requests.map((request) => ({
-    id: `${request.id}-${iterationIndex + 1}`,
-    requestId: request.id,
-    iteration: iterationIndex + 1,
-    method: request.method,
-    name: request.name || request.url,
-    url: request.url,
-    status: 'waiting' as const
-  })))
-}
-
-async function runRunnerQueueRequest(request: domain.Request, iteration: number) {
-  const queueId = `${request.id}-${iteration}`
-  updateRunnerQueueItem(queueId, { status: 'running', message: t.value.running })
-  const startedAt = Date.now()
-  let requestToSend = normalizeRequest(cloneRequest(request))
-  try {
-    syncFormBody(requestToSend)
-    statusMessage.value = t.value.sendingRequest
-    const savedState = await SaveRequest(requestToSend)
-    setState(savedState)
-    const result = await SendRequest(requestToSend, activeEnvironment.value?.id ?? '', globalsDraft.value)
-    const summary = summarizeRunnerResponse(result)
-    updateRunnerQueueItem(queueId, {
-      status: summary.passed ? 'passed' : 'failed',
-      url: result.requestedUrl || requestToSend.url,
-      statusCode: result.statusCode,
-      durationMs: result.durationMs,
-      message: summary.message
-    })
-    addRunnerResultItem(requestToSend, summary.passed, summary.message)
-    try {
-      const latestState = await GetState()
-      setState(latestState)
-    } catch (error) {
-      statusMessage.value = formatError(error)
-    }
-  } catch (error) {
-    const message = formatError(error)
-    updateRunnerQueueItem(queueId, {
-      status: 'failed',
-      durationMs: Date.now() - startedAt,
-      message
-    })
-    addRunnerResultItem(requestToSend, false, message)
-  }
-}
-
-function addRunnerResultItem(request: domain.Request, passed: boolean, message: string) {
-  if (!runnerResult.value) return
-  runnerResult.value.passed += passed ? 1 : 0
-  runnerResult.value.failed += passed ? 0 : 1
-  runnerResult.value.items = [
-    ...(runnerResult.value.items ?? []),
-    new domain.TestResult({ name: request.name || request.url, passed, message })
-  ]
-}
-
-function summarizeRunnerResponse(result: domain.Response) {
-  if (result.error) {
-    return { passed: false, message: result.error }
-  }
-  const tests = result.testResults ?? []
-  if (tests.length) {
-    const failedTest = tests.find((item) => !item.passed)
-    if (failedTest) {
-      return {
-        passed: false,
-        message: failedTest.message ? `${failedTest.name}: ${failedTest.message}` : failedTest.name
-      }
-    }
-    return { passed: true, message: `${tests.length} ${t.value.tests}` }
-  }
-  return {
-    passed: result.statusCode >= 200 && result.statusCode < 400,
-    message: result.status || `${result.statusCode || '-'}`
-  }
-}
-
-function updateRunnerQueueItem(id: string, patch: Partial<RunnerQueueItem>) {
-  let updated = false
-  runnerQueue.value = runnerQueue.value.map((item) => {
-    if (item.id !== id) return item
-    updated = true
-    return { ...item, ...patch }
-  })
-  if (!updated) {
-    runnerQueue.value = [
-      ...runnerQueue.value,
-      {
-        id,
-        requestId: id,
-        iteration: 1,
-        method: '-',
-        name: id,
-        url: '',
-        status: 'failed',
-        ...patch
-      }
-    ]
-  }
-}
-
 async function runWebSocketCheck() {
   realtimeBusy.value = true
   wsResult.value = null
@@ -955,158 +783,6 @@ function setAuthType(value: string) {
   activeRequest.value.auth = new domain.AuthConfig({ type: value, values: defaultAuthValues(value) })
 }
 
-function defaultAuthValues(type: string) {
-  switch (type) {
-    case 'apiKey':
-      return { key: 'X-API-Key', value: '', in: 'header' }
-    case 'bearer':
-      return { token: '' }
-    case 'basic':
-    case 'digest':
-      return { username: '', password: '' }
-    case 'oauth1':
-      return { consumerKey: '', consumerSecret: '', token: '', tokenSecret: '' }
-    case 'oauth2':
-      return { accessToken: '' }
-    default:
-      return {}
-  }
-}
-
-function authBadgeCount(request: domain.Request | null) {
-  if (!request?.auth?.type || request.auth.type === 'none') return 0
-  return 1
-}
-
-function newKeyValue() {
-  return new domain.KeyValue({
-    id: crypto.randomUUID(),
-    enabled: true,
-    key: '',
-    value: '',
-    description: '',
-    secret: false,
-    valueType: 'static',
-    timestampFormat: 'seconds',
-    sourceRequestId: '',
-    jsonPath: '$.',
-    responseStrategy: 'latestHistory',
-    refreshAfterSeconds: 300,
-    fallbackValue: ''
-  })
-}
-
-function newFormItem() {
-  return new domain.FormItem({ id: crypto.randomUUID(), enabled: true, key: '', type: 'text', value: '', filePath: '', description: '' })
-}
-
-function cloneKeyValues(items: domain.KeyValue[]) {
-  return items.map((item) => normalizeKeyValue(new domain.KeyValue({ ...item })))
-}
-
-function cloneRequest(request: domain.Request) {
-  return new domain.Request(JSON.parse(JSON.stringify(request)))
-}
-
-function normalizeRequest(request: domain.Request) {
-  request.params = request.params ?? []
-  request.headers = request.headers ?? []
-  request.params = request.params.map(normalizeKeyValue)
-  request.headers = request.headers.map(normalizeKeyValue)
-  request.proxy = normalizeProxy(request.proxy, 'inherit')
-  if (request.bodyMode === 'form') {
-    request.formItems = normalizeFormItems(request.formItems ?? [], request.body ?? '')
-    request.body = formItemsToBody(request.formItems)
-  } else {
-    request.formItems = normalizeFormItems(request.formItems ?? [], '')
-  }
-  if (!request.auth) {
-    request.auth = new domain.AuthConfig({ type: 'none', values: {} })
-  }
-  return request
-}
-
-function normalizeKeyValue(item: domain.KeyValue) {
-  item.id = item.id || crypto.randomUUID()
-  item.enabled = item.enabled ?? true
-  item.key = item.key ?? ''
-  item.value = item.value ?? ''
-  item.description = item.description ?? ''
-  item.secret = item.secret ?? false
-  item.valueType = item.valueType || 'static'
-  item.timestampFormat = item.timestampFormat || 'seconds'
-  item.sourceRequestId = item.sourceRequestId || ''
-  item.jsonPath = item.jsonPath || '$.'
-  item.responseStrategy = item.responseStrategy || 'latestHistory'
-  item.refreshAfterSeconds = item.refreshAfterSeconds || 300
-  item.fallbackValue = item.fallbackValue || ''
-  return item
-}
-
-function normalizeProxy(proxy: domain.ProxyConfig | undefined, fallbackMode: 'inherit' | 'none') {
-  const mode = proxy?.mode === 'custom' || proxy?.mode === 'none' || proxy?.mode === 'inherit' ? proxy.mode : fallbackMode
-  return new domain.ProxyConfig({
-    mode,
-    url: mode === 'custom' ? (proxy?.url ?? '') : '',
-    noProxy: mode === 'custom' ? normalizeNoProxy(proxy?.noProxy ?? '') : ''
-  })
-}
-
-function normalizeNoProxy(raw: string) {
-  return raw
-    .split(/[,\s]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .filter((item, index, list) => list.indexOf(item) === index)
-    .join(',')
-}
-
-function normalizeFormItems(items: domain.FormItem[], fallbackBody: string) {
-  const source = items.length ? items : formItemsFromBody(fallbackBody)
-  const normalized = source.map((item) => new domain.FormItem({
-    id: item.id || crypto.randomUUID(),
-    enabled: item.enabled ?? true,
-    key: item.key ?? '',
-    type: item.type === 'file' ? 'file' : 'text',
-    value: item.value ?? '',
-    filePath: item.filePath ?? '',
-    description: item.description ?? ''
-  }))
-  return normalized.length ? normalized : [newFormItem()]
-}
-
-function formItemsFromBody(raw: string) {
-  return raw
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const index = line.indexOf('=')
-      const key = index >= 0 ? line.slice(0, index).trim() : line.trim()
-      const value = index >= 0 ? line.slice(index + 1).trim() : ''
-      if (value.startsWith('@')) {
-        return new domain.FormItem({ id: crypto.randomUUID(), enabled: true, key, type: 'file', value: '', filePath: value.slice(1), description: '' })
-      }
-      return new domain.FormItem({ id: crypto.randomUUID(), enabled: true, key, type: 'text', value, filePath: '', description: '' })
-    })
-}
-
-function formItemsToBody(items: domain.FormItem[]) {
-  return (items ?? [])
-    .filter((item) => item.key || item.value || item.filePath)
-    .map((item) => `${item.key}=${item.type === 'file' ? `@${item.filePath}` : item.value}`)
-    .join('\n')
-}
-
-function syncFormBody(request: domain.Request) {
-  if (request.bodyMode === 'form') {
-    request.formItems = normalizeFormItems(request.formItems ?? [], request.body ?? '')
-    request.body = formItemsToBody(request.formItems)
-  } else {
-    request.formItems = normalizeFormItems(request.formItems ?? [], '')
-  }
-}
-
 function minimiseWindow() {
   WindowMinimise()
 }
@@ -1158,7 +834,6 @@ function closeWindow() {
         :environment-panel="environmentPanel"
         :editing-collection-id="editingCollectionId"
         :pending-delete-collection-id="pendingDeleteCollectionId"
-        @set-toolbar-ref="collectionToolbarRef = $event"
         @select-collection="selectCollection"
         @start-editing-collection="startEditingCollection"
         @cancel-editing-collection="cancelEditingCollection"
