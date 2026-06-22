@@ -29,8 +29,10 @@ const emit = defineEmits<{
 
 const root = ref<HTMLElement | null>(null)
 const button = ref<HTMLButtonElement | null>(null)
+const menu = ref<HTMLElement | null>(null)
 const open = ref(false)
 const activeIndex = ref(0)
+const menuStyle = ref<Record<string, string>>({})
 
 const enabledOptions = computed(() => props.options.filter((option) => !option.disabled))
 const selectedOption = computed(() => props.options.find((option) => option.value === props.modelValue))
@@ -40,6 +42,7 @@ watch(open, (next) => {
   if (!next) return
   const index = props.options.findIndex((option) => option.value === props.modelValue && !option.disabled)
   activeIndex.value = index >= 0 ? index : Math.max(0, props.options.findIndex((option) => !option.disabled))
+  void nextTick(updateMenuPosition)
 })
 
 function close() {
@@ -49,6 +52,26 @@ function close() {
 function toggle() {
   if (props.disabled) return
   open.value = !open.value
+}
+
+function updateMenuPosition() {
+  if (!open.value || !button.value) return
+  const rect = button.value.getBoundingClientRect()
+  const gap = 4
+  const margin = 8
+  const spaceBelow = window.innerHeight - rect.bottom - margin
+  const spaceAbove = rect.top - margin
+  const openUp = spaceBelow < 160 && spaceAbove > spaceBelow
+  const available = Math.max(120, openUp ? spaceAbove - gap : spaceBelow - gap)
+  const maxHeight = Math.min(260, available)
+  menuStyle.value = {
+    left: `${Math.max(margin, rect.left)}px`,
+    width: `${rect.width}px`,
+    maxHeight: `${maxHeight}px`,
+    ...(openUp
+      ? { bottom: `${Math.max(margin, window.innerHeight - rect.top + gap)}px`, top: 'auto' }
+      : { top: `${rect.bottom + gap}px`, bottom: 'auto' })
+  }
 }
 
 function selectOption(option: SelectOption) {
@@ -101,10 +124,14 @@ function handleDocumentPointer(event: MouseEvent) {
 
 onMounted(() => {
   document.addEventListener('mousedown', handleDocumentPointer, true)
+  window.addEventListener('resize', updateMenuPosition)
+  window.addEventListener('scroll', updateMenuPosition, true)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', handleDocumentPointer, true)
+  window.removeEventListener('resize', updateMenuPosition)
+  window.removeEventListener('scroll', updateMenuPosition, true)
 })
 </script>
 
@@ -123,7 +150,7 @@ onBeforeUnmount(() => {
       <span :class="{ placeholder: !selectedOption }">{{ displayLabel }}</span>
       <ChevronDown class="custom-select-arrow" :size="14" />
     </button>
-    <div v-if="open" :class="['custom-select-menu', menuClass]" role="listbox">
+    <div v-if="open" ref="menu" :class="['custom-select-menu', menuClass]" :style="menuStyle" role="listbox">
       <button
         v-for="(option, index) in options"
         :key="option.value"

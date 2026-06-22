@@ -203,14 +203,10 @@ select option:hover {
 }
 
 .custom-select-menu {
-  position: absolute;
-  z-index: 60;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
+  position: fixed;
+  z-index: 1000;
   display: grid;
   max-height: 260px;
-  min-width: 100%;
   overflow: auto;
   padding: 4px;
   border: 1px solid var(--input-border);
@@ -634,8 +630,15 @@ button {
   overflow: hidden;
 }
 
-.runner-main-pane > .section-header {
+.runner-main-pane > .section-header,
+.settings-main-pane > .section-header,
+.realtime-main-pane > .section-header {
   flex: 0 0 auto;
+}
+
+.settings-main-pane,
+.realtime-main-pane {
+  overflow: hidden;
 }
 
 .editor-header {
@@ -866,6 +869,16 @@ button {
   width: 100%;
 }
 
+.kv-row .custom-select {
+  width: 100%;
+}
+
+.kv-row .custom-select-button {
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 3px;
+}
+
 .kv-row .variable-input-wrap > input {
   width: 100%;
   height: 28px;
@@ -933,6 +946,7 @@ button {
 
 .response-var-grid input,
 .response-var-grid select,
+.response-var-grid .custom-select-button,
 .response-var-grid .variable-input-wrap > input {
   width: 100%;
   height: 28px;
@@ -997,8 +1011,11 @@ button {
 
 .settings-sections {
   display: grid;
+  align-content: start;
   gap: 18px;
+  flex: 1;
   min-width: 0;
+  min-height: 0;
   padding: 16px 18px;
   overflow: auto;
 }
@@ -1022,6 +1039,15 @@ button {
   grid-template-columns: repeat(2, minmax(220px, 1fr));
   gap: 12px;
   padding: 10px 0 0;
+  overflow: visible;
+}
+
+.settings-field .custom-select {
+  width: 100%;
+}
+
+.settings-field .custom-select-menu {
+  z-index: 80;
 }
 
 .settings-field .variable-input-wrap,
@@ -1834,6 +1860,7 @@ iframe {
 
 .environment-editor {
   min-width: 0;
+  min-height: 0;
   padding-top: 14px;
   overflow: auto;
 }
@@ -1850,6 +1877,9 @@ iframe {
   display: grid;
   grid-template-columns: repeat(2, minmax(340px, 1fr));
   gap: 12px;
+  flex: 1;
+  align-items: stretch;
+  min-height: 0;
   padding: 16px;
   overflow: auto;
 }
@@ -1858,7 +1888,7 @@ iframe {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  min-height: 520px;
+  min-height: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel);
@@ -1887,7 +1917,7 @@ iframe {
 
 .result-box {
   flex: 1;
-  min-height: 180px;
+  min-height: 0;
   margin: 10px 12px 12px;
   overflow: auto;
   border: 1px solid var(--border-soft);

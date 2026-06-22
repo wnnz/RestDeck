@@ -1178,7 +1178,11 @@ function closeWindow() {
         @delete-environment="deleteEnvironment"
       />
 
-      <section :class="['main-pane', { 'runner-main-pane': activeNav === 'runner' }]">
+      <section :class="['main-pane', {
+        'runner-main-pane': activeNav === 'runner',
+        'settings-main-pane': activeNav === 'settings',
+        'realtime-main-pane': activeNav === 'realtime'
+      }]">
         <RequestWorkspace
           v-if="activeNav === 'collections'"
           v-model:active-request="activeRequest"
