@@ -1,89 +1,80 @@
 # RestDeck
 
-RestDeck 是一个本地优先、开源、无账号登录的桌面 API 测试工具，目标是覆盖 Postman 中常用的本地调试工作流。它不依赖云同步、团队空间或账号体系；应用内只展示已经实现的功能，未实现的能力不会出现在导航、按钮或占位面板里。
+RestDeck 是一个本地优先的桌面 API 调试工具，专注于常用 HTTP 请求、环境变量、历史记录和集合运行工作流。
 
-## 技术栈
+## 界面截图
 
-- Go + Wails v2
-- Vue 3 + Vite
-- Tailwind CSS v4
-- PrimeVue Volt 风格的代码自有 UI
-- SQLite 保存本地工作区数据
-- goja 支持常用 Postman `pm` 脚本子集
+### 请求工作台
 
-## 当前已实现
+![请求工作台](docs/images/restdeck-requests-light.png)
 
-- 集合、请求、环境、全局变量、历史记录、Runner、本地设置页面。
-- 集合下拉选择、集合改名、集合删除，以及新建请求菜单。
-- HTTP/REST 请求编辑：Method、URL、Params、Headers、Body、Auth、Pre-request、Tests、Timeout。
-- 常见认证：No Auth、API Key、Bearer Token、Basic、Digest 配置占位、OAuth 1 签名、OAuth 2 Bearer Token。
-- 响应查看：Body、Headers、Cookies、Test Results、状态码、耗时、大小。
-- JSON 响应美化与基础语法着色。
-- 本地 SQLite 持久化，数据位于系统用户配置目录。
-- 敏感环境变量和认证字段使用本地加密封装保存。
-- Postman Collection JSON 常用字段导入/导出。
-- 浏览器 Copy as Fetch 导入请求。
-- 浏览器 Copy as cURL 常见格式导入请求。
-- 动态变量：`{{$guid}}`、`{{$timestamp}}`、`{{$isoTimestamp}}`、`{{$randomInt}}`、`{{$randomBoolean}}`、`{{$randomEmail}}`。
-- 常用 `pm` 脚本子集：`pm.variables.get/set/replaceIn`、`pm.request`、`pm.response`、`pm.test`、基础 `expect(...)` 断言。
-- WebSocket 单消息调试和 SSE 事件流采集。
-- Windows 下自定义标题栏，支持最小化、最大化/还原、关闭、拖动和双击最大化/还原。
+### 暗色模式
 
-## 暂未实现
+![暗色模式请求工作台](docs/images/restdeck-requests-dark.png)
 
-这些功能在真正实现前不会显示在应用 UI 中：
+### 环境变量
 
-- gRPC
-- Mock Servers
-- Monitors
-- Flows
-- 团队/云工作区
-- AI 功能
-- 完整 Postman Sandbox 兼容
-- 完整 Digest challenge-response 流程
-- OpenAPI 导入/导出
-- 请求文档侧边栏
+![环境变量](docs/images/restdeck-environments-light.png)
 
-当前功能状态见 [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md)。
+### 集合 Runner
 
-## 开发
+![集合 Runner](docs/images/restdeck-runner-light.png)
 
-如本机尚未安装 Wails v2：
+### 设置
 
-```powershell
-$env:GOPROXY='https://goproxy.cn,direct'
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
-```
+![暗色模式设置](docs/images/restdeck-settings-dark.png)
 
-安装前端依赖：
+## 功能
 
-```powershell
-cd frontend
-npm install
-```
+### 请求调试
 
-运行检查：
+- 支持创建、复制、置顶、删除和导出请求。
+- 支持 GET、POST、PUT、PATCH、DELETE 等常用 HTTP Method。
+- 支持 URL、查询参数、请求头、Body、认证、预请求脚本、测试脚本和超时时间配置。
+- 支持 Params、Headers 等表格化编辑，并自动保存修改。
+- 支持 JSON Body 编辑、美化和语法高亮。
+- 支持 form 请求体，包含文本字段和本地文件上传字段。
+- 支持从浏览器 Copy as Fetch / Copy as cURL 导入请求。
+- 支持生成常用客户端代码，包括 cURL、Fetch、Node.js、Python、Go、C#、Java 等格式。
 
-```powershell
-go test ./...
-cd frontend
-npm run build
-```
+### 响应查看
 
-构建桌面应用：
+- 展示响应状态码、耗时、响应大小和内容类型。
+- 支持查看响应 Body、响应头、Cookies 和测试结果。
+- 支持响应正文的原始视图、格式化视图和 JSON 高亮。
+- 历史记录展示实际请求地址、状态和耗时，可回到对应请求查看。
 
-```powershell
-$env:Path="$env:USERPROFILE\go\bin;$env:Path"
-wails build -clean
-```
+### 集合与 Runner
 
-开发模式运行：
+- 支持集合创建、重命名、删除、导入和导出。
+- 支持 Postman Collection JSON 导入与导出。
+- 支持按集合或单个请求运行。
+- Runner 可展示等待中、运行中、通过、失败等请求状态。
+- Runner 支持迭代次数、当前环境和运行结果统计。
 
-```powershell
-$env:Path="$env:USERPROFILE\go\bin;$env:Path"
-wails dev
-```
+### 环境与变量
 
-## 产品方向
+- 支持全局变量和环境变量。
+- 支持新增、重命名、删除环境。
+- 环境变量支持静态值、时间戳和从请求响应 JSONPath 读取值。
+- 响应变量支持读取最新历史、每次读取前请求、超时后重新请求。
+- 输入框支持 `{{变量}}` 提示和插入。
+- 支持动态变量，如 `$guid`、`$timestamp`、`$isoTimestamp`、`$randomInt`、`$randomBoolean`、`$randomEmail` 等。
+- 环境和变量修改自动保存。
 
-RestDeck 会优先打磨高频、本地、无账号的 API 调试体验，再逐步扩展到更完整的非账号功能集。核心原则是：界面紧凑、专业、诚实；功能没完成，就不在应用里假装存在。
+### 认证、代理与脚本
+
+- 支持 No Auth、API Key、Bearer Token、Basic、Digest、OAuth 1、OAuth 2 Bearer Token 等认证配置。
+- 支持默认代理、请求独立代理、禁用代理和代理排除规则。
+- 支持 HTTP、WebSocket、SSE 使用代理配置。
+- 支持常用 Postman `pm` 脚本子集，包括变量读取替换、请求对象、响应对象、测试断言等。
+
+### 实时与其他能力
+
+- 支持 WebSocket 单消息调试。
+- 支持 SSE 事件流采集。
+- 支持浅色和暗色主题切换。
+- 支持中文和英文界面。
+- 数据保存到程序同目录的 `Data` 文件夹。
+- 敏感字段使用本地加密封装保存。
+- 支持 Windows 自定义标题栏、窗口拖动、最小化、最大化和关闭。
