@@ -410,10 +410,8 @@ async function deleteCollectionFromPicker(collection: domain.Collection) {
   }
 }
 
-function createRequest() {
-  const collection = activeCollection.value
-  if (!collection) return
-  activeRequest.value = new domain.Request({
+function makeNewRequest(collection: domain.Collection) {
+  return new domain.Request({
     id: crypto.randomUUID(),
     collectionId: collection.id,
     parentId: '',
@@ -432,8 +430,42 @@ function createRequest() {
     timeoutMs: 30000,
     sortOrder: collection.requests?.length ?? 0
   })
-  response.value = null
+}
+
+async function createRequest() {
+  busy.value = true
   addMenuOpen.value = false
+  try {
+    let collection = activeCollection.value
+    if (!collection) {
+      const refreshedState = await GetState()
+      setState(refreshedState)
+      collection = activeCollection.value
+    }
+    if (!collection) {
+      const createdState = await CreateCollection(`${t.value.collections} ${(state.value?.collections?.length ?? 0) + 1}`)
+      collection = createdState.collections?.[createdState.collections.length - 1] ?? createdState.collections?.[0] ?? null
+      setState(createdState)
+      if (collection?.id) activeCollectionId.value = collection.id
+    }
+    if (!collection?.id) return
+
+    const request = makeNewRequest(collection)
+    const next = await SaveRequest(request)
+    activeCollectionId.value = collection.id
+    setState(next)
+    const saved = next.collections
+      ?.find((item) => item.id === collection.id)
+      ?.requests
+      ?.find((item) => item.id === request.id)
+    selectRequest(saved ?? request)
+    activeRequestTab.value = 'params'
+    statusMessage.value = t.value.requestCreated
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
 }
 
 async function saveActiveRequest() {

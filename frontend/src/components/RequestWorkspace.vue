@@ -365,6 +365,6 @@ function newFormItem() {
   <div v-else class="blank-state">
     <FileJson2 :size="28" />
     <span>{{ t.createOrSelect }}</span>
-    <VoltButton class="send-btn" @click="emit('create-request')"><Plus :size="15" /> New request</VoltButton>
+    <VoltButton class="send-btn" @click="emit('create-request')"><Plus :size="15" /> {{ t.newRequest }}</VoltButton>
   </div>
 </template>

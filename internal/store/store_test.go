@@ -150,6 +150,31 @@ func TestDataDirUsesExecutableDataFolder(t *testing.T) {
 	}
 }
 
+func TestSeedAddsDefaultEnvironmentWhenCollectionsExist(t *testing.T) {
+	s, err := OpenInMemory(t.Context())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	if _, err := s.db.ExecContext(t.Context(), `DELETE FROM environments`); err != nil {
+		t.Fatalf("delete environments: %v", err)
+	}
+	if err := s.seed(t.Context()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	state, err := s.State(t.Context())
+	if err != nil {
+		t.Fatalf("state: %v", err)
+	}
+	if len(state.Collections) == 0 {
+		t.Fatal("expected existing collections")
+	}
+	if len(state.Environments) != 1 || state.Environments[0].Name != "Local" {
+		t.Fatalf("environments = %#v", state.Environments)
+	}
+}
+
 func TestStoreRenamesCollection(t *testing.T) {
 	s, err := OpenInMemory(t.Context())
 	if err != nil {

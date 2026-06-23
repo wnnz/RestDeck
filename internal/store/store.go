@@ -204,53 +204,61 @@ func (s *Store) ensureColumn(ctx context.Context, table, column, definition stri
 }
 
 func (s *Store) seed(ctx context.Context) error {
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM collections`).Scan(&count); err != nil {
+	var collectionCount int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM collections`).Scan(&collectionCount); err != nil {
 		return err
 	}
-	if count > 0 {
-		return nil
+	now := time.Now()
+	if collectionCount == 0 {
+		collection := domain.Collection{
+			ID:          uuid.NewString(),
+			Name:        "Getting Started",
+			Description: "A small local collection for trying RestDeck.",
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		request := domain.Request{
+			ID:           uuid.NewString(),
+			CollectionID: collection.ID,
+			Name:         "GET httpbin anything",
+			Method:       "GET",
+			URL:          "https://httpbin.org/anything",
+			Params:       []domain.KeyValue{{ID: uuid.NewString(), Enabled: true, Key: "source", Value: "restdeck"}},
+			Headers:      []domain.KeyValue{{ID: uuid.NewString(), Enabled: true, Key: "Accept", Value: "application/json"}},
+			BodyMode:     domain.BodyModeNone,
+			Auth:         domain.AuthConfig{Type: domain.AuthTypeNone, Values: map[string]string{}},
+			Proxy:        domain.ProxyConfig{Mode: "inherit"},
+			TimeoutMs:    30000,
+			UpdatedAt:    now,
+		}
+		if err := s.SaveCollection(ctx, collection); err != nil {
+			return err
+		}
+		if err := s.SaveRequest(ctx, request); err != nil {
+			return err
+		}
 	}
 
-	now := time.Now()
-	collection := domain.Collection{
-		ID:          uuid.NewString(),
-		Name:        "Getting Started",
-		Description: "A small local collection for trying RestDeck.",
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-	request := domain.Request{
-		ID:           uuid.NewString(),
-		CollectionID: collection.ID,
-		Name:         "GET httpbin anything",
-		Method:       "GET",
-		URL:          "https://httpbin.org/anything",
-		Params:       []domain.KeyValue{{ID: uuid.NewString(), Enabled: true, Key: "source", Value: "restdeck"}},
-		Headers:      []domain.KeyValue{{ID: uuid.NewString(), Enabled: true, Key: "Accept", Value: "application/json"}},
-		BodyMode:     domain.BodyModeNone,
-		Auth:         domain.AuthConfig{Type: domain.AuthTypeNone, Values: map[string]string{}},
-		Proxy:        domain.ProxyConfig{Mode: "inherit"},
-		TimeoutMs:    30000,
-		UpdatedAt:    now,
-	}
-	if err := s.SaveCollection(ctx, collection); err != nil {
+	var environmentCount int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM environments`).Scan(&environmentCount); err != nil {
 		return err
 	}
-	if err := s.SaveRequest(ctx, request); err != nil {
-		return err
+	if environmentCount == 0 {
+		env := domain.Environment{
+			ID:        uuid.NewString(),
+			Name:      "Local",
+			IsActive:  true,
+			UpdatedAt: now,
+			Variables: []domain.KeyValue{
+				{ID: uuid.NewString(), Enabled: true, Key: "baseUrl", Value: "https://httpbin.org"},
+				{ID: uuid.NewString(), Enabled: true, Key: "token", Value: "", Secret: true},
+			},
+		}
+		if err := s.SaveEnvironment(ctx, env); err != nil {
+			return err
+		}
 	}
-	env := domain.Environment{
-		ID:        uuid.NewString(),
-		Name:      "Local",
-		IsActive:  true,
-		UpdatedAt: now,
-		Variables: []domain.KeyValue{
-			{ID: uuid.NewString(), Enabled: true, Key: "baseUrl", Value: "https://httpbin.org"},
-			{ID: uuid.NewString(), Enabled: true, Key: "token", Value: "", Secret: true},
-		},
-	}
-	return s.SaveEnvironment(ctx, env)
+	return nil
 }
 
 func (s *Store) State(ctx context.Context) (domain.WorkspaceState, error) {

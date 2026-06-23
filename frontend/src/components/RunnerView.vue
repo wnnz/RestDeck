@@ -103,7 +103,7 @@ function statusLabel(status: RunnerQueueItem['status']) {
       <VoltButton class="send-btn runner-run-wide" :disabled="runnerBusy || (runnerScope === 'collection' ? !canRunCollection : !canRunRequest)" @click="runnerScope === 'collection' ? emit('runCollection') : emit('runRequest')">
         <Loader2 v-if="runnerBusy" class="spin" :size="15" />
         <Play v-else :size="15" />
-        {{ runnerScope === 'collection' ? t.runCollection : t.runRequest }}
+        {{ runnerScope === 'collection' ? t.startRunCollection : t.startRunRequest }}
       </VoltButton>
     </section>
 
