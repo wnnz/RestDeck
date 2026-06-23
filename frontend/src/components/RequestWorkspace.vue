@@ -63,11 +63,28 @@ const requestTitleInputStyle = computed(() => {
 })
 
 function editRequestTitle() {
+  if (editingRequestTitle.value) {
+    focusRequestTitle()
+    return
+  }
   editingRequestTitle.value = true
+  focusRequestTitle()
+}
+
+function focusRequestTitle() {
   void nextTick(() => {
-    requestTitleInput.value?.input?.focus()
-    requestTitleInput.value?.input?.select()
+    requestTitleInput.value?.focus()
+    requestTitleInput.value?.select()
   })
+}
+
+function finishRequestTitleEdit() {
+  editingRequestTitle.value = false
+}
+
+function cancelRequestTitleEdit() {
+  requestTitleInput.value?.blur()
+  editingRequestTitle.value = false
 }
 
 watch(() => activeRequest.value?.id, () => {
@@ -179,9 +196,9 @@ function newFormItem() {
           v-model="activeRequest.name"
           input-class="title-input"
           :input-style="requestTitleInputStyle"
-          @blur="editingRequestTitle = false"
-          @keydown.enter.prevent="editingRequestTitle = false"
-          @keydown.esc.prevent="editingRequestTitle = false"
+          @blur="finishRequestTitleEdit"
+          @keydown.enter.prevent="requestTitleInput?.blur()"
+          @keydown.esc.prevent="cancelRequestTitleEdit"
         />
         <button
           v-else

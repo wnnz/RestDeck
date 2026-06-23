@@ -220,8 +220,8 @@ function startEditingEnvironment(environment: domain.Environment) {
   editingEnvironmentName.value = environment.name
   emit('selectEnvironment', environment.id)
   void nextTick(() => {
-    environmentRenameInput.value?.input?.focus()
-    environmentRenameInput.value?.input?.select()
+    environmentRenameInput.value?.focus()
+    environmentRenameInput.value?.select()
   })
 }
 

@@ -232,9 +232,18 @@ button {
 .top-search input,
 .top-search .top-search-input {
   flex: 1;
+  width: 100%;
+  height: 26px;
+  padding: 0;
   border: 0;
+  border-radius: 0;
   background: transparent;
   --wails-draggable: no-drag;
+}
+
+.top-search:focus-within {
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .top-theme-btn {
@@ -543,6 +552,11 @@ button {
 .stack-label input:focus {
   border-color: var(--accent-soft);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.top-search .top-search-input:focus {
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .volt-select,

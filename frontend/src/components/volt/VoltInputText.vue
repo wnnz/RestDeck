@@ -35,8 +35,35 @@ const value = computed({
 
 const input = ref<HTMLInputElement | null>(null)
 
+function inputElement(raw: unknown = input.value): HTMLInputElement | null {
+  if (raw instanceof HTMLInputElement) return raw
+  if (raw instanceof HTMLElement) {
+    if (raw.matches('input')) return raw as HTMLInputElement
+    return raw.querySelector('input')
+  }
+  if (raw && typeof raw === 'object' && '$el' in raw) {
+    return inputElement((raw as { $el?: unknown }).$el)
+  }
+  return null
+}
+
+function focus() {
+  inputElement()?.focus()
+}
+
+function select() {
+  inputElement()?.select()
+}
+
+function blur() {
+  inputElement()?.blur()
+}
+
 defineExpose({
-  input
+  input,
+  focus,
+  select,
+  blur
 })
 
 const rootClass = computed(() => cn(
