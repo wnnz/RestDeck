@@ -57,7 +57,7 @@ async function copyCode() {
         <span>{{ t.codeFormat }}</span>
         <VoltSelect v-model="selectedFormat" :options="codeFormatOptions" />
       </label>
-      <VoltButton class="send-btn" @click="copyCode">
+      <VoltButton class="send-btn code-copy-button" @click="copyCode">
         <Clipboard :size="15" />
         {{ t.copyCode }}
       </VoltButton>

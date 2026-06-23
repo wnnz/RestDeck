@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { CheckCircle2, Clock3, Download, FileJson2, Loader2, Plus, Save, Send, Trash2, Wand2, XCircle } from 'lucide-vue-next'
+import { computed, nextTick, ref, watch } from 'vue'
+import { CheckCircle2, Clock3, FileJson2, Loader2, Plus, Send, Trash2, Wand2, XCircle } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import VoltSelect from './volt/VoltSelect.vue'
 import JsonBodyEditor from './JsonBodyEditor.vue'
@@ -33,11 +33,9 @@ const activeRequest = defineModel<domain.Request | null>('activeRequest', { requ
 const activeRequestTab = defineModel<RequestTab>('activeRequestTab', { required: true })
 const activeResponseTab = defineModel<ResponseTab>('activeResponseTab', { required: true })
 const responseView = defineModel<ResponseView>('responseView', { required: true })
+const requestTitleInput = ref<InstanceType<typeof VoltInputText> | null>(null)
 
 const emit = defineEmits<{
-  'save-request': []
-  'delete-request': []
-  'export-collection': []
   'create-request': []
   'add-param': []
   'add-header': []
@@ -57,9 +55,24 @@ const proxyModeOptions = computed(() => [
   { value: 'none', label: props.t.proxyNone },
   { value: 'custom', label: props.t.proxyCustom }
 ])
+const editingRequestTitle = ref(false)
+const requestTitleInputStyle = computed(() => {
+  const text = activeRequest.value?.name || props.t.requestName
+  const units = Array.from(text).reduce((total, char) => total + (char.charCodeAt(0) > 255 ? 2 : 1), 0)
+  return { width: `${Math.min(Math.max(units + 3, 12), 52)}ch` }
+})
+
+function editRequestTitle() {
+  editingRequestTitle.value = true
+  void nextTick(() => {
+    requestTitleInput.value?.input?.focus()
+    requestTitleInput.value?.input?.select()
+  })
+}
 
 watch(() => activeRequest.value?.id, () => {
   formEditorMode.value = 'table'
+  editingRequestTitle.value = false
   ensureFormItems()
 })
 
@@ -160,21 +173,25 @@ function newFormItem() {
       <div class="breadcrumb">
         <span>{{ activeCollection?.name ?? 'Collection' }}</span>
         <span>/</span>
-        <VoltInputText v-model="activeRequest.name" input-class="title-input" />
-      </div>
-      <div class="editor-actions">
-        <VoltButton class="toolbar-btn" :disabled="busy" @click="emit('save-request')">
-          <Save :size="14" />
-          {{ t.save }}
-        </VoltButton>
-        <VoltButton class="toolbar-btn" :disabled="!activeRequest.id || busy" @click="emit('delete-request')">
-          <Trash2 :size="14" />
-          {{ t.delete }}
-        </VoltButton>
-        <VoltButton class="toolbar-btn" :disabled="!activeCollection" @click="emit('export-collection')">
-          <Download :size="14" />
-          {{ t.export }}
-        </VoltButton>
+        <VoltInputText
+          v-if="editingRequestTitle"
+          ref="requestTitleInput"
+          v-model="activeRequest.name"
+          input-class="title-input"
+          :input-style="requestTitleInputStyle"
+          @blur="editingRequestTitle = false"
+          @keydown.enter.prevent="editingRequestTitle = false"
+          @keydown.esc.prevent="editingRequestTitle = false"
+        />
+        <button
+          v-else
+          class="title-display"
+          type="button"
+          :style="requestTitleInputStyle"
+          @click="editRequestTitle"
+        >
+          {{ activeRequest.name || t.requestName }}
+        </button>
       </div>
     </div>
 

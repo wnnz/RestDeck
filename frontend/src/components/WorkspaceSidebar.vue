@@ -20,7 +20,6 @@ const props = defineProps<{
   activeEnvironment: domain.Environment | null
   environmentPanel: 'environment' | 'globals'
   collectionPickerOpen: boolean
-  addMenuOpen: boolean
   optionsMenuOpen: boolean
   editingCollectionId: string
   editingCollectionName: string
@@ -29,7 +28,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:collectionPickerOpen': [value: boolean]
-  'update:addMenuOpen': [value: boolean]
   'update:optionsMenuOpen': [value: boolean]
   'update:editingCollectionName': [value: string]
   selectCollection: [collection: domain.Collection]
@@ -45,6 +43,7 @@ const emit = defineEmits<{
   exportCollection: []
   selectRequest: [request: domain.Request]
   generateRequestCode: [request: domain.Request]
+  exportRequest: [request: domain.Request]
   pinRequest: [request: domain.Request]
   duplicateRequest: [request: domain.Request]
   deleteRequest: [request: domain.Request]
@@ -62,7 +61,6 @@ const editingEnvironmentId = ref('')
 const editingEnvironmentName = ref('')
 const environmentRenameInput = ref<InstanceType<typeof VoltInputText> | null>(null)
 const collectionPickerPopover = ref<InstanceType<typeof VoltPopover> | null>(null)
-const addMenuPopover = ref<InstanceType<typeof VoltPopover> | null>(null)
 const optionsMenuPopover = ref<InstanceType<typeof VoltPopover> | null>(null)
 const requestMenuPopover = ref<InstanceType<typeof VoltPopover> | InstanceType<typeof VoltPopover>[] | null>(null)
 const environmentMenuPopover = ref<InstanceType<typeof VoltPopover> | InstanceType<typeof VoltPopover>[] | null>(null)
@@ -71,26 +69,14 @@ const environmentMenuAnchor = ref<HTMLElement | null>(null)
 
 function toggleCollectionPicker(event: Event) {
   collectionPickerPopover.value?.toggle(event)
-  emit('update:addMenuOpen', false)
   emit('update:optionsMenuOpen', false)
-  addMenuPopover.value?.hide()
-  optionsMenuPopover.value?.hide()
-}
-
-function toggleAddMenu(event: Event) {
-  addMenuPopover.value?.toggle(event)
-  emit('update:collectionPickerOpen', false)
-  emit('update:optionsMenuOpen', false)
-  collectionPickerPopover.value?.hide()
   optionsMenuPopover.value?.hide()
 }
 
 function toggleOptionsMenu(event: Event) {
   optionsMenuPopover.value?.toggle(event)
   emit('update:collectionPickerOpen', false)
-  emit('update:addMenuOpen', false)
   collectionPickerPopover.value?.hide()
-  addMenuPopover.value?.hide()
 }
 
 function closeEnvironmentMenu() {
@@ -111,10 +97,8 @@ function handleRequestMenuHide() {
 
 function closeActionMenus() {
   collectionPickerPopover.value?.hide()
-  addMenuPopover.value?.hide()
   optionsMenuPopover.value?.hide()
   emit('update:collectionPickerOpen', false)
-  emit('update:addMenuOpen', false)
   emit('update:optionsMenuOpen', false)
 }
 
@@ -193,6 +177,11 @@ function currentEnvironmentMenuPopover() {
 function generateRequestCode(request: domain.Request) {
   closeRequestMenu()
   emit('generateRequestCode', request)
+}
+
+function exportRequest(request: domain.Request) {
+  closeRequestMenu()
+  emit('exportRequest', request)
 }
 
 function pinRequest(request: domain.Request) {
@@ -316,30 +305,6 @@ function deleteEnvironment(id: string) {
 
         <div class="collection-actions">
           <div class="menu-wrap">
-            <VoltButton class="icon-btn" size="icon" variant="ghost" :title="t.new" @click="toggleAddMenu">
-              <Plus :size="15" />
-            </VoltButton>
-            <VoltPopover
-              ref="addMenuPopover"
-              content-class="action-menu"
-              @hide="emit('update:addMenuOpen', false)"
-              @show="emit('update:addMenuOpen', true)"
-            >
-              <VoltButton variant="ghost" @click="createRequest">
-                <Plus :size="14" />
-                {{ t.newRequest }}
-              </VoltButton>
-              <VoltButton variant="ghost" @click="openFetchModal">
-                <Import :size="14" />
-                {{ t.importFromFetch }}
-              </VoltButton>
-              <VoltButton variant="ghost" @click="openCurlModal">
-                <Import :size="14" />
-                {{ t.importFromCurl }}
-              </VoltButton>
-            </VoltPopover>
-          </div>
-          <div class="menu-wrap">
             <VoltButton class="icon-btn" size="icon" variant="ghost" :title="t.collectionOptions" @click="toggleOptionsMenu">
               <MoreHorizontal :size="14" />
             </VoltButton>
@@ -351,7 +316,15 @@ function deleteEnvironment(id: string) {
             >
               <VoltButton variant="ghost" @click="openPostmanModal">
                 <Import :size="14" />
-                {{ t.importFromPostman }}
+                {{ t.import }}
+              </VoltButton>
+              <VoltButton variant="ghost" @click="openFetchModal">
+                <Import :size="14" />
+                {{ t.importFromFetch }}
+              </VoltButton>
+              <VoltButton variant="ghost" @click="openCurlModal">
+                <Import :size="14" />
+                {{ t.importFromCurl }}
               </VoltButton>
               <VoltButton variant="ghost" :disabled="!activeCollection" @click="exportCollection">
                 <Download :size="14" />
@@ -377,6 +350,10 @@ function deleteEnvironment(id: string) {
     <template v-if="activeNav === 'collections'">
       <div class="request-list">
         <span ref="requestMenuAnchor" class="context-menu-anchor" aria-hidden="true"></span>
+        <VoltButton class="request-row new-request-row" variant="ghost" @click="createRequest">
+          <Plus :size="14" />
+          <span>{{ t.newRequest }}</span>
+        </VoltButton>
         <VoltButton
           v-for="request in filteredRequests"
           :key="request.id"
@@ -398,6 +375,10 @@ function deleteEnvironment(id: string) {
               <VoltButton variant="ghost" @click="generateRequestCode(request)">
                 <Code2 :size="14" />
                 {{ t.generateCode }}
+              </VoltButton>
+              <VoltButton variant="ghost" @click="exportRequest(request)">
+                <Download :size="14" />
+                {{ t.export }}
               </VoltButton>
               <VoltButton variant="ghost" @click="pinRequest(request)">
                 <Pin :size="14" />

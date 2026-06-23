@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, Save, Trash2 } from 'lucide-vue-next'
+import { Plus, Trash2 } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import type { VariableSuggestion } from '../types'
@@ -20,8 +20,6 @@ const envDraft = defineModel<{ id: string; name: string; variables: domain.KeyVa
 const globalsDraft = defineModel<domain.KeyValue[]>('globalsDraft', { required: true })
 
 const emit = defineEmits<{
-  saveEnvironment: []
-  saveGlobals: []
   addVariable: [target: domain.KeyValue[]]
   removeRow: [target: domain.KeyValue[], index: number]
 }>()
@@ -64,10 +62,6 @@ function responseStrategyOptions() {
     <div>
       <h2>{{ mode === 'globals' ? t.globals : t.environments }}</h2>
       <p v-if="mode === 'globals'">{{ t.localOnly }}</p>
-    </div>
-    <div class="header-actions">
-      <VoltButton v-if="mode === 'environment'" class="toolbar-btn" @click="emit('saveEnvironment')"><Save :size="14" /> {{ t.save }}</VoltButton>
-      <VoltButton v-else class="toolbar-btn" @click="emit('saveGlobals')"><Save :size="14" /> {{ t.save }}</VoltButton>
     </div>
   </div>
 

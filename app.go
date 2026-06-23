@@ -266,6 +266,16 @@ func (a *App) ExportPostmanCollection(collectionID string) (string, error) {
 	return "", fmt.Errorf("collection %s not found", collectionID)
 }
 
+func (a *App) ExportPostmanRequest(r domain.Request, collectionName string) (string, error) {
+	r = a.prepareSecrets(r, false)
+	r.ParentID = ""
+	return reqsvc.ExportPostman(domain.Collection{
+		ID:       r.CollectionID,
+		Name:     fallback(r.Name, collectionName),
+		Requests: []domain.Request{r},
+	})
+}
+
 func (a *App) RunCollection(collectionID, environmentID string, iterations int) (domain.RunnerResult, error) {
 	state, err := a.store.State(a.ctx)
 	if err != nil {

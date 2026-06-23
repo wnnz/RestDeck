@@ -26,6 +26,10 @@ export function ExportPostmanCollection(arg1) {
   return window['go']['main']['App']['ExportPostmanCollection'](arg1);
 }
 
+export function ExportPostmanRequest(arg1, arg2) {
+  return window['go']['main']['App']['ExportPostmanRequest'](arg1, arg2);
+}
+
 export function FormatBody(arg1, arg2) {
   return window['go']['main']['App']['FormatBody'](arg1, arg2);
 }

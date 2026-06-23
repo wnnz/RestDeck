@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import InputText from 'primevue/inputtext'
 import { computed, ref } from 'vue'
+import type { StyleValue } from 'vue'
 import { cn } from '../../utils/classNames'
 
 const props = withDefaults(defineProps<{
@@ -11,6 +12,7 @@ const props = withDefaults(defineProps<{
   readonly?: boolean
   spellcheck?: boolean
   inputClass?: string
+  inputStyle?: StyleValue
 }>(), {
   type: 'text',
   placeholder: '',
@@ -54,7 +56,7 @@ const rootClass = computed(() => cn(
     :disabled="disabled"
     :readonly="readonly"
     :spellcheck="spellcheck"
-    :pt="{ root: { class: rootClass } }"
+    :pt="{ root: { class: rootClass, style: inputStyle } }"
     unstyled
     @input="emit('input', $event)"
     @keydown="emit('keydown', $event)"

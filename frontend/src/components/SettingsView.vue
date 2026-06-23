@@ -4,7 +4,6 @@ import type { Translation } from '../i18n/messages'
 import type { Language } from '../types'
 import VoltSelect from './volt/VoltSelect.vue'
 import VariableSuggestInput from './VariableSuggestInput.vue'
-import VoltButton from './volt/VoltButton.vue'
 
 defineProps<{
   t: Translation
@@ -12,16 +11,11 @@ defineProps<{
 
 const language = defineModel<Language>('language', { required: true })
 const settingsDraft = defineModel<domain.Settings>('settingsDraft', { required: true })
-
-const emit = defineEmits<{
-  saveSettings: []
-}>()
 </script>
 
 <template>
   <div class="section-header">
     <div><h2>{{ t.settings }}</h2></div>
-    <VoltButton class="toolbar-btn" @click="emit('saveSettings')">{{ t.save }}</VoltButton>
   </div>
   <div class="settings-sections">
     <section class="settings-group">

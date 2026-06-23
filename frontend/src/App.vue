@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import {
   Globe2,
   History,
@@ -15,6 +15,7 @@ import {
   DeleteEnvironment,
   DeleteRequest,
   ExportPostmanCollection,
+  ExportPostmanRequest,
   FormatBody,
   GetState,
   ImportCurlRequest,
@@ -82,7 +83,6 @@ const postmanText = ref('')
 const fetchText = ref('')
 const curlText = ref('')
 const collectionPickerOpen = ref(false)
-const addMenuOpen = ref(false)
 const optionsMenuOpen = ref(false)
 const editingCollectionId = ref('')
 const editingCollectionName = ref('')
@@ -105,6 +105,27 @@ const sseDraft = reactive({
 })
 const wsResult = ref<realtime.WebSocketResult | null>(null)
 const sseResult = ref<realtime.SSEResult | null>(null)
+let requestAutosaveTimer: ReturnType<typeof setTimeout> | null = null
+let environmentAutosaveTimer: ReturnType<typeof setTimeout> | null = null
+let globalsAutosaveTimer: ReturnType<typeof setTimeout> | null = null
+let settingsAutosaveTimer: ReturnType<typeof setTimeout> | null = null
+let lastRequestAutosaveSnapshot = ''
+let lastRequestAutosaveId = ''
+let lastEnvironmentAutosaveSnapshot = ''
+let lastGlobalsAutosaveSnapshot = ''
+let lastSettingsAutosaveSnapshot = ''
+let suppressRequestAutosave = false
+let suppressEnvironmentAutosave = false
+let suppressGlobalsAutosave = false
+let suppressSettingsAutosave = false
+let requestAutosaveQueued = false
+let environmentAutosaveQueued = false
+let globalsAutosaveQueued = false
+let settingsAutosaveQueued = false
+let requestAutosavePromise: Promise<void> | null = null
+let environmentAutosavePromise: Promise<void> | null = null
+let globalsAutosavePromise: Promise<void> | null = null
+let settingsAutosavePromise: Promise<void> | null = null
 
 const envDraft = reactive({
   id: '',
@@ -268,21 +289,372 @@ watch(theme, (next) => {
 
 watch(activeEnvironment, (env) => {
   if (!env) return
-  envDraft.id = env.id
-  envDraft.name = env.name
-  envDraft.variables = cloneKeyValues(env.variables ?? [])
+  suppressEnvironmentAutosave = true
+  if (envDraft.id === env.id) {
+    envDraft.name = env.name
+  } else {
+    envDraft.id = env.id
+    envDraft.name = env.name
+    envDraft.variables = cloneKeyValues(env.variables ?? [])
+  }
+  lastEnvironmentAutosaveSnapshot = environmentDraftSnapshot()
+  void nextTick(() => {
+    suppressEnvironmentAutosave = false
+  })
 }, { immediate: true })
 
 watch(state, (next) => {
-  globalsDraft.value = cloneKeyValues(next?.globals ?? [])
+  const nextGlobals = cloneKeyValues(next?.globals ?? [])
+  const nextGlobalsSnapshot = JSON.stringify(normalizedKeyValues(nextGlobals))
+  if (globalsSnapshot() !== nextGlobalsSnapshot) {
+    suppressGlobalsAutosave = true
+    globalsDraft.value = nextGlobals
+    void nextTick(() => {
+      suppressGlobalsAutosave = false
+    })
+  }
+  lastGlobalsAutosaveSnapshot = nextGlobalsSnapshot
   if (next?.settings) {
+    suppressSettingsAutosave = true
     settingsDraft.language = (next.settings.language as Language) || language.value
     settingsDraft.theme = (next.settings.theme as Theme) || theme.value
     settingsDraft.defaultProxy = normalizeProxy(next.settings.defaultProxy, 'none')
     language.value = settingsDraft.language as Language
     theme.value = settingsDraft.theme as Theme
+    lastSettingsAutosaveSnapshot = settingsSnapshot()
+    void nextTick(() => {
+      suppressSettingsAutosave = false
+    })
   }
 })
+
+watch(() => activeRequest.value?.id ?? '', (id) => {
+  clearRequestAutosaveTimer()
+  lastRequestAutosaveId = id
+  lastRequestAutosaveSnapshot = requestSnapshot(activeRequest.value)
+})
+
+watch(activeRequest, () => {
+  scheduleRequestAutosave()
+}, { deep: true })
+
+watch(envDraft, () => {
+  if (environmentPanel.value === 'environment') scheduleEnvironmentAutosave()
+}, { deep: true })
+
+watch(globalsDraft, () => {
+  scheduleGlobalsAutosave()
+}, { deep: true })
+
+watch(settingsDraft, () => {
+  scheduleSettingsAutosave()
+}, { deep: true })
+
+watch(activeNav, (_next, previous) => {
+  if (previous === 'collections') void flushRequestAutosave()
+  if (previous === 'environments') void flushCurrentEnvironmentPanelAutosave()
+  if (previous === 'settings') void flushSettingsAutosave()
+})
+
+function clearRequestAutosaveTimer() {
+  if (requestAutosaveTimer) {
+    clearTimeout(requestAutosaveTimer)
+    requestAutosaveTimer = null
+  }
+}
+
+function clearEnvironmentAutosaveTimer() {
+  if (environmentAutosaveTimer) {
+    clearTimeout(environmentAutosaveTimer)
+    environmentAutosaveTimer = null
+  }
+}
+
+function clearGlobalsAutosaveTimer() {
+  if (globalsAutosaveTimer) {
+    clearTimeout(globalsAutosaveTimer)
+    globalsAutosaveTimer = null
+  }
+}
+
+function clearSettingsAutosaveTimer() {
+  if (settingsAutosaveTimer) {
+    clearTimeout(settingsAutosaveTimer)
+    settingsAutosaveTimer = null
+  }
+}
+
+function requestSnapshot(request: domain.Request | null) {
+  if (!request?.id) return ''
+  const next = normalizeRequest(cloneRequest(request))
+  syncFormBody(next)
+  next.updatedAt = ''
+  return JSON.stringify(next)
+}
+
+function normalizedKeyValues(items: domain.KeyValue[]) {
+  return (items ?? []).map((item) => normalizeKeyValue(new domain.KeyValue({ ...item })))
+}
+
+function environmentDraftModel() {
+  return new domain.Environment({
+    id: envDraft.id,
+    name: envDraft.name || t.value.environments,
+    variables: normalizedKeyValues(envDraft.variables),
+    isActive: true
+  })
+}
+
+function environmentDraftSnapshot() {
+  if (!envDraft.id) return ''
+  const env = environmentDraftModel()
+  env.updatedAt = ''
+  return JSON.stringify(env)
+}
+
+function globalsSnapshot() {
+  return JSON.stringify(normalizedKeyValues(globalsDraft.value))
+}
+
+function settingsModel() {
+  return new domain.Settings({
+    ...settingsDraft,
+    language: language.value,
+    theme: theme.value,
+    defaultProxy: normalizeProxy(settingsDraft.defaultProxy, 'none')
+  })
+}
+
+function settingsSnapshot() {
+  return JSON.stringify(settingsModel())
+}
+
+function updateRequestInState(request: domain.Request) {
+  if (!state.value?.collections?.length) return
+  state.value = new domain.WorkspaceState({
+    ...state.value,
+    collections: state.value.collections.map((collection) => {
+      if (collection.id !== request.collectionId) return collection
+      const requests = (collection.requests ?? []).map((item) => item.id === request.id ? normalizeRequest(cloneRequest(request)) : item)
+      return new domain.Collection({ ...collection, requests })
+    })
+  })
+}
+
+function updateEnvironmentInState(env: domain.Environment) {
+  if (!state.value) return
+  state.value = new domain.WorkspaceState({
+    ...state.value,
+    environments: (state.value.environments ?? []).map((item) => item.id === env.id ? new domain.Environment({ ...item, ...env }) : item)
+  })
+}
+
+function updateGlobalsInState(globals: domain.KeyValue[]) {
+  if (!state.value) return
+  state.value = new domain.WorkspaceState({
+    ...state.value,
+    globals: cloneKeyValues(globals)
+  })
+}
+
+function scheduleRequestAutosave() {
+  if (suppressRequestAutosave || !activeRequest.value?.id) return
+  const snapshot = requestSnapshot(activeRequest.value)
+  if (!snapshot || (snapshot === lastRequestAutosaveSnapshot && activeRequest.value.id === lastRequestAutosaveId)) return
+  clearRequestAutosaveTimer()
+  requestAutosaveTimer = setTimeout(() => { void runRequestAutosave() }, 650)
+}
+
+function scheduleEnvironmentAutosave() {
+  if (suppressEnvironmentAutosave || !envDraft.id) return
+  const snapshot = environmentDraftSnapshot()
+  if (!snapshot || snapshot === lastEnvironmentAutosaveSnapshot) return
+  clearEnvironmentAutosaveTimer()
+  environmentAutosaveTimer = setTimeout(() => { void runEnvironmentAutosave() }, 650)
+}
+
+function scheduleGlobalsAutosave() {
+  if (suppressGlobalsAutosave) return
+  const snapshot = globalsSnapshot()
+  if (snapshot === lastGlobalsAutosaveSnapshot) return
+  clearGlobalsAutosaveTimer()
+  globalsAutosaveTimer = setTimeout(() => { void runGlobalsAutosave() }, 650)
+}
+
+function scheduleSettingsAutosave() {
+  if (suppressSettingsAutosave) return
+  const snapshot = settingsSnapshot()
+  if (snapshot === lastSettingsAutosaveSnapshot) return
+  clearSettingsAutosaveTimer()
+  settingsAutosaveTimer = setTimeout(() => { void runSettingsAutosave() }, 650)
+}
+
+async function runRequestAutosave() {
+  clearRequestAutosaveTimer()
+  if (requestAutosavePromise) {
+    requestAutosaveQueued = true
+    return requestAutosavePromise
+  }
+  requestAutosavePromise = (async () => {
+    try {
+      do {
+        requestAutosaveQueued = false
+        await saveActiveRequestAutosaveOnce()
+      } while (requestAutosaveQueued || (requestSnapshot(activeRequest.value) && requestSnapshot(activeRequest.value) !== lastRequestAutosaveSnapshot))
+    } finally {
+      requestAutosavePromise = null
+    }
+  })()
+  return requestAutosavePromise
+}
+
+async function runEnvironmentAutosave() {
+  clearEnvironmentAutosaveTimer()
+  if (environmentAutosavePromise) {
+    environmentAutosaveQueued = true
+    return environmentAutosavePromise
+  }
+  environmentAutosavePromise = (async () => {
+    try {
+      do {
+        environmentAutosaveQueued = false
+        await saveEnvironmentAutosaveOnce()
+      } while (environmentAutosaveQueued || (environmentDraftSnapshot() && environmentDraftSnapshot() !== lastEnvironmentAutosaveSnapshot))
+    } finally {
+      environmentAutosavePromise = null
+    }
+  })()
+  return environmentAutosavePromise
+}
+
+async function runGlobalsAutosave() {
+  clearGlobalsAutosaveTimer()
+  if (globalsAutosavePromise) {
+    globalsAutosaveQueued = true
+    return globalsAutosavePromise
+  }
+  globalsAutosavePromise = (async () => {
+    try {
+      do {
+        globalsAutosaveQueued = false
+        await saveGlobalsAutosaveOnce()
+      } while (globalsAutosaveQueued || globalsSnapshot() !== lastGlobalsAutosaveSnapshot)
+    } finally {
+      globalsAutosavePromise = null
+    }
+  })()
+  return globalsAutosavePromise
+}
+
+async function runSettingsAutosave() {
+  clearSettingsAutosaveTimer()
+  if (settingsAutosavePromise) {
+    settingsAutosaveQueued = true
+    return settingsAutosavePromise
+  }
+  settingsAutosavePromise = (async () => {
+    try {
+      do {
+        settingsAutosaveQueued = false
+        await saveSettingsAutosaveOnce()
+      } while (settingsAutosaveQueued || settingsSnapshot() !== lastSettingsAutosaveSnapshot)
+    } finally {
+      settingsAutosavePromise = null
+    }
+  })()
+  return settingsAutosavePromise
+}
+
+async function flushRequestAutosave() {
+  clearRequestAutosaveTimer()
+  await runRequestAutosave()
+}
+
+async function flushEnvironmentAutosave() {
+  clearEnvironmentAutosaveTimer()
+  await runEnvironmentAutosave()
+}
+
+async function flushGlobalsAutosave() {
+  clearGlobalsAutosaveTimer()
+  await runGlobalsAutosave()
+}
+
+async function flushSettingsAutosave() {
+  clearSettingsAutosaveTimer()
+  await runSettingsAutosave()
+}
+
+async function flushCurrentEnvironmentPanelAutosave() {
+  if (environmentPanel.value === 'environment') {
+    await flushEnvironmentAutosave()
+  } else {
+    await flushGlobalsAutosave()
+  }
+}
+
+async function saveActiveRequestAutosaveOnce() {
+  const request = activeRequest.value
+  if (!request?.id) return
+  const nextRequest = normalizeRequest(cloneRequest(request))
+  syncFormBody(nextRequest)
+  const snapshot = requestSnapshot(nextRequest)
+  if (!snapshot || (snapshot === lastRequestAutosaveSnapshot && nextRequest.id === lastRequestAutosaveId)) return
+  try {
+    await SaveRequest(nextRequest)
+    lastRequestAutosaveId = nextRequest.id
+    lastRequestAutosaveSnapshot = snapshot
+    if (activeRequest.value?.id === nextRequest.id) {
+      updateRequestInState(nextRequest)
+    }
+    statusMessage.value = t.value.requestSaved
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
+
+async function saveEnvironmentAutosaveOnce() {
+  if (!envDraft.id) return
+  const env = environmentDraftModel()
+  const snapshot = environmentDraftSnapshot()
+  if (!snapshot || snapshot === lastEnvironmentAutosaveSnapshot) return
+  try {
+    await SaveEnvironment(env)
+    lastEnvironmentAutosaveSnapshot = snapshot
+    updateEnvironmentInState(env)
+    statusMessage.value = t.value.environmentSaved
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
+
+async function saveGlobalsAutosaveOnce() {
+  const globals = normalizedKeyValues(globalsDraft.value)
+  const snapshot = JSON.stringify(globals)
+  if (snapshot === lastGlobalsAutosaveSnapshot) return
+  try {
+    await SaveGlobals(globals)
+    lastGlobalsAutosaveSnapshot = snapshot
+    updateGlobalsInState(globals)
+    statusMessage.value = t.value.globalsSaved
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
+
+async function saveSettingsAutosaveOnce() {
+  const nextSettings = settingsModel()
+  const snapshot = JSON.stringify(nextSettings)
+  if (snapshot === lastSettingsAutosaveSnapshot) return
+  try {
+    const next = await SaveSettings(nextSettings)
+    lastSettingsAutosaveSnapshot = snapshot
+    setState(next)
+    statusMessage.value = t.value.settingsSaved
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
 
 async function loadState() {
   try {
@@ -317,19 +689,21 @@ function setState(next: domain.WorkspaceState) {
   ensureRunnerRequest(activeRequest.value?.id ?? '')
 }
 
-function selectRequest(request: domain.Request) {
+async function selectRequest(request: domain.Request) {
+  await flushRequestAutosave()
   activeRequest.value = normalizeRequest(cloneRequest(request))
   setRunnerRequest(request.id)
   response.value = null
   activeResponseTab.value = 'body'
 }
 
-function selectHistoryRequest(request: domain.Request) {
-  selectRequest(request)
+async function selectHistoryRequest(request: domain.Request) {
+  await selectRequest(request)
   activeNav.value = 'collections'
 }
 
 async function createCollection() {
+  await flushRequestAutosave()
   const name = `${t.value.collections} ${(state.value?.collections?.length ?? 0) + 1}`
   const next = await CreateCollection(name)
   setState(next)
@@ -337,7 +711,8 @@ async function createCollection() {
   statusMessage.value = t.value.collectionCreated
 }
 
-function selectCollection(collection: domain.Collection) {
+async function selectCollection(collection: domain.Collection) {
+  await flushRequestAutosave()
   activeCollectionId.value = collection.id
   activeRequest.value = collection.requests?.[0] ? normalizeRequest(cloneRequest(collection.requests[0])) : null
   setRunnerRequest(activeRequest.value?.id ?? '')
@@ -348,7 +723,7 @@ function selectCollection(collection: domain.Collection) {
 
 function selectCollectionById(id: string) {
   const collection = state.value?.collections?.find((item) => item.id === id)
-  if (collection) selectCollection(collection)
+  if (collection) void selectCollection(collection)
 }
 
 function startEditingCollection(collection: domain.Collection) {
@@ -367,6 +742,7 @@ async function saveEditingCollection(collection: domain.Collection) {
   const nextName = editingCollectionName.value.trim()
   cancelEditingCollection()
   if (!nextName || nextName === collection.name) return
+  await flushRequestAutosave()
   busy.value = true
   try {
     const next = await SaveCollection(new domain.Collection({
@@ -391,6 +767,7 @@ async function deleteCollectionFromPicker(collection: domain.Collection) {
     return
   }
 
+  await flushRequestAutosave()
   busy.value = true
   try {
     const next = await DeleteCollection(collection.id)
@@ -433,8 +810,8 @@ function makeNewRequest(collection: domain.Collection) {
 }
 
 async function createRequest() {
+  await flushRequestAutosave()
   busy.value = true
-  addMenuOpen.value = false
   try {
     let collection = activeCollection.value
     if (!collection) {
@@ -458,7 +835,7 @@ async function createRequest() {
       ?.find((item) => item.id === collection.id)
       ?.requests
       ?.find((item) => item.id === request.id)
-    selectRequest(saved ?? request)
+    await selectRequest(saved ?? request)
     activeRequestTab.value = 'params'
     statusMessage.value = t.value.requestCreated
   } catch (error) {
@@ -468,39 +845,9 @@ async function createRequest() {
   }
 }
 
-async function saveActiveRequest() {
-  if (!activeRequest.value) return
-  syncFormBody(activeRequest.value)
-  busy.value = true
-  try {
-    const next = await SaveRequest(activeRequest.value)
-    setState(next)
-    statusMessage.value = t.value.requestSaved
-  } catch (error) {
-    statusMessage.value = formatError(error)
-  } finally {
-    busy.value = false
-  }
-}
-
-async function deleteActiveRequest() {
-  if (!activeRequest.value?.id) return
-  busy.value = true
-  try {
-    const next = await DeleteRequest(activeRequest.value.id)
-    activeRequest.value = null
-    response.value = null
-    setState(next)
-    statusMessage.value = t.value.requestDeleted
-  } catch (error) {
-    statusMessage.value = formatError(error)
-  } finally {
-    busy.value = false
-  }
-}
-
 async function sendActiveRequest() {
   if (!activeRequest.value) return
+  await flushRequestAutosave()
   syncFormBody(activeRequest.value)
   const requestToSend = normalizeRequest(cloneRequest(activeRequest.value))
   if (!requestToSend.id) requestToSend.id = crypto.randomUUID()
@@ -528,6 +875,7 @@ async function sendActiveRequest() {
 
 async function importPostmanCollection() {
   if (!postmanText.value.trim()) return
+  await flushRequestAutosave()
   busy.value = true
   try {
     const next = await ImportPostmanCollection(postmanText.value)
@@ -544,13 +892,14 @@ async function importPostmanCollection() {
 
 async function importFetchRequest() {
   if (!fetchText.value.trim()) return
+  await flushRequestAutosave()
   busy.value = true
   try {
     const previousRequestIds = new Set(activeCollection.value?.requests?.map((request) => request.id) ?? [])
     const collectionID = activeCollection.value?.id ?? ''
     const next = await ImportFetchRequest(fetchText.value, collectionID)
     setState(next)
-    selectLatestImportedRequest(previousRequestIds)
+    await selectLatestImportedRequest(previousRequestIds)
     activeRequestTab.value = 'headers'
     activeModal.value = null
     fetchText.value = ''
@@ -564,13 +913,14 @@ async function importFetchRequest() {
 
 async function importCurlRequest() {
   if (!curlText.value.trim()) return
+  await flushRequestAutosave()
   busy.value = true
   try {
     const previousRequestIds = new Set(activeCollection.value?.requests?.map((request) => request.id) ?? [])
     const collectionID = activeCollection.value?.id ?? ''
     const next = await ImportCurlRequest(curlText.value, collectionID)
     setState(next)
-    selectLatestImportedRequest(previousRequestIds)
+    await selectLatestImportedRequest(previousRequestIds)
     activeRequestTab.value = 'headers'
     activeModal.value = null
     curlText.value = ''
@@ -582,9 +932,9 @@ async function importCurlRequest() {
   }
 }
 
-function selectLatestImportedRequest(previousRequestIds: Set<string>) {
+async function selectLatestImportedRequest(previousRequestIds: Set<string>) {
   const imported = activeCollection.value?.requests?.find((request) => !previousRequestIds.has(request.id))
-  if (imported) selectRequest(imported)
+  if (imported) await selectRequest(imported)
 }
 
 function openPostmanModal() {
@@ -624,6 +974,7 @@ function submitActiveModal() {
 async function exportCollection() {
   const collection = activeCollection.value
   if (!collection) return
+  await flushRequestAutosave()
   try {
     exportText.value = await ExportPostmanCollection(collection.id)
     activeModal.value = 'export'
@@ -634,9 +985,20 @@ async function exportCollection() {
   }
 }
 
+async function exportRequestFromMenu(request: domain.Request) {
+  const source = requestActionSource(request)
+  const collection = collectionForRequest(source)
+  try {
+    exportText.value = await ExportPostmanRequest(source, collection?.name ?? t.value.collections)
+    activeModal.value = 'export'
+    statusMessage.value = t.value.requestExported
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
+
 function closeCollectionMenus() {
   collectionPickerOpen.value = false
-  addMenuOpen.value = false
   optionsMenuOpen.value = false
 }
 
@@ -682,6 +1044,7 @@ function markCodeCopied() {
 }
 
 async function pinRequestToTop(request: domain.Request) {
+  await flushRequestAutosave()
   const collection = collectionForRequest(request)
   if (!collection?.id || !request.id) return
   busy.value = true
@@ -699,6 +1062,7 @@ async function pinRequestToTop(request: domain.Request) {
 }
 
 async function duplicateRequestFromMenu(request: domain.Request) {
+  await flushRequestAutosave()
   const collection = collectionForRequest(request)
   if (!collection?.id || !request.id) return
   busy.value = true
@@ -724,7 +1088,7 @@ async function duplicateRequestFromMenu(request: domain.Request) {
       ?.find((item) => item.id === collection.id)
       ?.requests
       ?.find((item) => item.id === duplicate.id)
-    if (created) selectRequest(created)
+    if (created) await selectRequest(created)
     statusMessage.value = t.value.requestCopied
   } catch (error) {
     statusMessage.value = formatError(error)
@@ -735,6 +1099,7 @@ async function duplicateRequestFromMenu(request: domain.Request) {
 
 async function deleteRequestFromMenu(request: domain.Request) {
   if (!request.id) return
+  await flushRequestAutosave()
   busy.value = true
   try {
     const next = await DeleteRequest(request.id)
@@ -751,19 +1116,8 @@ async function deleteRequestFromMenu(request: domain.Request) {
   }
 }
 
-async function saveEnvironmentDraft() {
-  const env = new domain.Environment({
-    id: envDraft.id,
-    name: envDraft.name || t.value.environments,
-    variables: envDraft.variables.map(normalizeKeyValue),
-    isActive: true
-  })
-  const next = await SaveEnvironment(env)
-  setState(next)
-  statusMessage.value = t.value.environmentSaved
-}
-
 async function createEnvironment() {
+  await flushCurrentEnvironmentPanelAutosave()
   busy.value = true
   try {
     const next = await CreateEnvironment(`${t.value.environments} ${(state.value?.environments?.length ?? 0) + 1}`)
@@ -779,6 +1133,7 @@ async function createEnvironment() {
 
 async function deleteEnvironment(id: string) {
   if (!id) return
+  await flushCurrentEnvironmentPanelAutosave()
   busy.value = true
   try {
     const next = await DeleteEnvironment(id)
@@ -794,6 +1149,7 @@ async function deleteEnvironment(id: string) {
 async function renameEnvironment(env: domain.Environment, name: string) {
   const nextName = name.trim()
   if (!env?.id || !nextName || nextName === env.name) return
+  await flushCurrentEnvironmentPanelAutosave()
   busy.value = true
   try {
     const variables = env.id === envDraft.id ? envDraft.variables.map(normalizeKeyValue) : cloneKeyValues(env.variables ?? [])
@@ -813,36 +1169,18 @@ async function renameEnvironment(env: domain.Environment, name: string) {
 }
 
 async function setEnvironment(id: string) {
+  await flushRequestAutosave()
+  await flushCurrentEnvironmentPanelAutosave()
+  await flushSettingsAutosave()
   environmentPanel.value = 'environment'
   const next = await SetActiveEnvironment(id)
   setState(next)
   statusMessage.value = t.value.environmentSelected
 }
 
-function selectGlobalEnvironment() {
+async function selectGlobalEnvironment() {
+  await flushCurrentEnvironmentPanelAutosave()
   environmentPanel.value = 'globals'
-}
-
-async function saveGlobalsDraft() {
-  const next = await SaveGlobals(globalsDraft.value.map(normalizeKeyValue))
-  setState(next)
-  statusMessage.value = t.value.globalsSaved
-}
-
-async function saveSettingsDraft() {
-  busy.value = true
-  try {
-    settingsDraft.language = language.value
-    settingsDraft.theme = theme.value
-    settingsDraft.defaultProxy = normalizeProxy(settingsDraft.defaultProxy, 'none')
-    const next = await SaveSettings(new domain.Settings(settingsDraft))
-    setState(next)
-    statusMessage.value = t.value.settingsSaved
-  } catch (error) {
-    statusMessage.value = formatError(error)
-  } finally {
-    busy.value = false
-  }
 }
 
 async function runWebSocketCheck() {
@@ -934,7 +1272,10 @@ function toggleWindowMaximise() {
   WindowToggleMaximise()
 }
 
-function closeWindow() {
+async function closeWindow() {
+  await flushRequestAutosave()
+  await flushCurrentEnvironmentPanelAutosave()
+  await flushSettingsAutosave()
   Quit()
 }
 
@@ -962,7 +1303,6 @@ function closeWindow() {
       <WorkspaceSidebar
         v-if="activeNav !== 'history' && activeNav !== 'runner' && activeNav !== 'settings'"
         v-model:collection-picker-open="collectionPickerOpen"
-        v-model:add-menu-open="addMenuOpen"
         v-model:options-menu-open="optionsMenuOpen"
         v-model:editing-collection-name="editingCollectionName"
         :t="t"
@@ -990,6 +1330,7 @@ function closeWindow() {
         @export-collection="exportCollection"
         @select-request="selectRequest"
         @generate-request-code="openRequestCodeModal"
+        @export-request="exportRequestFromMenu"
         @pin-request="pinRequestToTop"
         @duplicate-request="duplicateRequestFromMenu"
         @delete-request="deleteRequestFromMenu"
@@ -1024,9 +1365,6 @@ function closeWindow() {
           :body-modes="bodyModes"
           :variable-suggestions="variableSuggestions"
           :send-request-action="sendActiveRequest"
-          @save-request="saveActiveRequest"
-          @delete-request="deleteActiveRequest"
-          @export-collection="exportCollection"
           @create-request="createRequest"
           @add-param="addParam"
           @add-header="addHeader"
@@ -1045,8 +1383,6 @@ function closeWindow() {
           :mode="environmentPanel"
           :collections="state?.collections ?? []"
           :variable-suggestions="variableSuggestions"
-          @save-environment="saveEnvironmentDraft"
-          @save-globals="saveGlobalsDraft"
           @add-variable="addVariable"
           @remove-row="removeRow"
         />
@@ -1097,7 +1433,6 @@ function closeWindow() {
           v-model:language="language"
           v-model:settings-draft="settingsDraft"
           :t="t"
-          @save-settings="saveSettingsDraft"
         />
       </section>
     </main>

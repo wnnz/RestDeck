@@ -15,6 +15,8 @@ export function DeleteRequest(arg1:string):Promise<domain.WorkspaceState>;
 
 export function ExportPostmanCollection(arg1:string):Promise<string>;
 
+export function ExportPostmanRequest(arg1:domain.Request,arg2:string):Promise<string>;
+
 export function FormatBody(arg1:string,arg2:string):Promise<string>;
 
 export function GetState():Promise<domain.WorkspaceState>;

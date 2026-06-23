@@ -29,6 +29,7 @@ const emit = defineEmits<{
 
 const inputRef = ref<InstanceType<typeof VoltInputText> | InstanceType<typeof VoltTextarea> | null>(null)
 const suggestPopover = ref<InstanceType<typeof VoltPopover> | null>(null)
+const optionRefs = ref<HTMLElement[]>([])
 const open = ref(false)
 const query = ref('')
 const selectedIndex = ref(0)
@@ -58,6 +59,10 @@ watch(filteredSuggestions, (items) => {
     suggestPopover.value?.hide()
     return
   }
+  optionRefs.value = []
+  if (selectedIndex.value >= items.length) {
+    selectedIndex.value = items.length - 1
+  }
   if (open.value) {
     const target = inputElement()
     if (target) {
@@ -65,6 +70,10 @@ watch(filteredSuggestions, (items) => {
       void nextTick(() => suggestPopover.value?.show(event, target))
     }
   }
+})
+
+watch(selectedIndex, () => {
+  scrollSelectedOptionIntoView()
 })
 
 function updateValue(value: string) {
@@ -107,6 +116,25 @@ function updateSuggestionState(target = inputElement()) {
   open.value = true
 }
 
+function setOptionRef(raw: unknown, index: number) {
+  const element = resolveHTMLElement(raw)
+  if (element) optionRefs.value[index] = element
+}
+
+function resolveHTMLElement(raw: unknown): HTMLElement | null {
+  if (raw instanceof HTMLElement) return raw
+  if (raw && typeof raw === 'object' && '$el' in raw) {
+    return resolveHTMLElement((raw as { $el?: unknown }).$el)
+  }
+  return null
+}
+
+function scrollSelectedOptionIntoView() {
+  void nextTick(() => {
+    optionRefs.value[selectedIndex.value]?.scrollIntoView({ block: 'nearest' })
+  })
+}
+
 function insertSuggestion(item: VariableSuggestion) {
   const target = inputElement()
   if (!target) return
@@ -136,9 +164,11 @@ function handleKeydown(event: KeyboardEvent) {
   if (event.key === 'ArrowDown') {
     event.preventDefault()
     selectedIndex.value = Math.min(selectedIndex.value + 1, filteredSuggestions.value.length - 1)
+    scrollSelectedOptionIntoView()
   } else if (event.key === 'ArrowUp') {
     event.preventDefault()
     selectedIndex.value = Math.max(selectedIndex.value - 1, 0)
+    scrollSelectedOptionIntoView()
   } else if (event.key === 'Enter' || event.key === 'Tab') {
     const item = filteredSuggestions.value[selectedIndex.value]
     if (item) {
@@ -183,16 +213,21 @@ function handleKeydown(event: KeyboardEvent) {
       @keydown="handleKeydown"
     />
     <VoltPopover ref="suggestPopover" class="variable-suggest-popover" content-class="variable-suggest" @mousedown.prevent>
+      <div class="variable-suggest-list" role="listbox">
       <VoltButton
         v-for="(item, index) in filteredSuggestions"
         :key="item.name"
+        :ref="(element) => setOptionRef(element, index)"
         :class="{ active: index === selectedIndex }"
         variant="ghost"
+        role="option"
+        :aria-selected="index === selectedIndex"
         @mousedown.prevent="insertSuggestion(item)"
       >
         <strong>{{ item.name }}</strong>
         <span>{{ item.detail }}</span>
       </VoltButton>
+      </div>
     </VoltPopover>
   </span>
 </template>
