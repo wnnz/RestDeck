@@ -20,6 +20,7 @@ func EffectiveProxy(requestProxy, defaultProxy domain.ProxyConfig) (domain.Proxy
 
 func EffectiveProxyForURL(requestProxy, defaultProxy domain.ProxyConfig, rawURL string) (domain.ProxyConfig, error) {
 	requestProxy = normalizeProxy(requestProxy, "inherit")
+	requestProxy.NoProxy = ""
 	defaultProxy = normalizeProxy(defaultProxy, "none")
 	effective := requestProxy
 	if effective.Mode == "inherit" {

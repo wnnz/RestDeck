@@ -1,7 +1,6 @@
 package store
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -133,45 +132,21 @@ func TestStorePersistsSettingsAndRequestProxy(t *testing.T) {
 	}
 }
 
-func TestDataDirUsesExecutableDataFolderAndMigratesLegacyDB(t *testing.T) {
+func TestDataDirUsesExecutableDataFolder(t *testing.T) {
 	oldExecutablePath := executablePath
-	oldUserConfigDir := userConfigDir
 	defer func() {
 		executablePath = oldExecutablePath
-		userConfigDir = oldUserConfigDir
 	}()
 
 	root := t.TempDir()
 	exeDir := filepath.Join(root, "app")
-	configDir := filepath.Join(root, "config")
-	if err := os.MkdirAll(filepath.Join(configDir, "RestDeck"), 0o755); err != nil {
-		t.Fatalf("mkdir config: %v", err)
-	}
 	executablePath = func() (string, error) { return filepath.Join(exeDir, "RestDeck.exe"), nil }
-	userConfigDir = func() (string, error) { return configDir, nil }
 	dir, err := dataDir()
 	if err != nil {
 		t.Fatalf("data dir: %v", err)
 	}
 	if dir != filepath.Join(exeDir, "Data") {
 		t.Fatalf("data dir = %q", dir)
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir data: %v", err)
-	}
-	legacy := filepath.Join(configDir, "RestDeck", "restdeck.db")
-	if err := os.WriteFile(legacy, []byte("legacy-db"), 0o644); err != nil {
-		t.Fatalf("write legacy: %v", err)
-	}
-	if err := migrateLegacyDatabase(dir); err != nil {
-		t.Fatalf("migrate legacy: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "restdeck.db"))
-	if err != nil {
-		t.Fatalf("read migrated: %v", err)
-	}
-	if string(data) != "legacy-db" {
-		t.Fatalf("migrated data = %q", data)
 	}
 }
 

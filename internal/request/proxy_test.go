@@ -66,3 +66,14 @@ func TestEffectiveProxyForURLUsesProxyWhenNoProxyMisses(t *testing.T) {
 		t.Fatalf("effective proxy = %#v", got)
 	}
 }
+
+func TestEffectiveProxyForURLIgnoresRequestNoProxy(t *testing.T) {
+	requestProxy := domain.ProxyConfig{Mode: "custom", URL: "http://127.0.0.1:7890", NoProxy: "localhost,127.0.0.1"}
+	got, err := EffectiveProxyForURL(requestProxy, domain.ProxyConfig{Mode: "none"}, "http://localhost:8080/api")
+	if err != nil {
+		t.Fatalf("effective proxy: %v", err)
+	}
+	if got.Mode != "custom" || got.URL != requestProxy.URL || got.NoProxy != "" {
+		t.Fatalf("effective proxy = %#v", got)
+	}
+}

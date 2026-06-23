@@ -5,8 +5,7 @@ import {
   History,
   ListTree,
   Play,
-  Settings,
-  Radio
+  Settings
 } from 'lucide-vue-next'
 import { Quit, WindowMinimise, WindowToggleMaximise } from '../wailsjs/runtime/runtime'
 import {
@@ -38,6 +37,7 @@ import EnvironmentsView from './components/EnvironmentsView.vue'
 import HistoryView from './components/HistoryView.vue'
 import ImportModal from './components/ImportModal.vue'
 import RealtimeView from './components/RealtimeView.vue'
+import RequestCodeModal from './components/RequestCodeModal.vue'
 import RequestWorkspace from './components/RequestWorkspace.vue'
 import RunnerView from './components/RunnerView.vue'
 import SettingsView from './components/SettingsView.vue'
@@ -88,6 +88,7 @@ const editingCollectionId = ref('')
 const editingCollectionName = ref('')
 const pendingDeleteCollectionId = ref('')
 const exportText = ref('')
+const codeModalRequest = ref<domain.Request | null>(null)
 const wsDraft = reactive({
   url: 'wss://echo.websocket.events',
   message: '{ "hello": "restdeck" }',
@@ -118,7 +119,6 @@ const navItems = computed(() => [
   { key: 'environments' as NavKey, label: t.value.environments, icon: Globe2 },
   { key: 'history' as NavKey, label: t.value.history, icon: History },
   { key: 'runner' as NavKey, label: t.value.runner, icon: Play },
-  { key: 'realtime' as NavKey, label: t.value.realtime, icon: Radio },
   { key: 'settings' as NavKey, label: t.value.settings, icon: Settings }
 ])
 
@@ -608,6 +608,117 @@ function closeCollectionMenus() {
   optionsMenuOpen.value = false
 }
 
+function requestActionSource(request: domain.Request) {
+  const source = activeRequest.value?.id === request.id ? activeRequest.value : request
+  const next = normalizeRequest(cloneRequest(source))
+  syncFormBody(next)
+  return next
+}
+
+function collectionForRequest(request: domain.Request) {
+  return state.value?.collections?.find((collection) => collection.id === request.collectionId)
+    ?? activeCollection.value
+    ?? null
+}
+
+async function saveOrderedRequests(collectionID: string, requests: domain.Request[]) {
+  let nextState: domain.WorkspaceState | null = null
+  for (const [index, request] of requests.entries()) {
+    const nextRequest = normalizeRequest(cloneRequest(request))
+    nextRequest.collectionId = collectionID
+    nextRequest.sortOrder = index
+    syncFormBody(nextRequest)
+    nextState = await SaveRequest(nextRequest)
+  }
+  if (nextState) {
+    activeCollectionId.value = collectionID
+    setState(nextState)
+  }
+  return nextState
+}
+
+function openRequestCodeModal(request: domain.Request) {
+  codeModalRequest.value = requestActionSource(request)
+}
+
+function setCodeModalVisible(value: boolean) {
+  if (!value) codeModalRequest.value = null
+}
+
+function markCodeCopied() {
+  statusMessage.value = t.value.codeCopied
+}
+
+async function pinRequestToTop(request: domain.Request) {
+  const collection = collectionForRequest(request)
+  if (!collection?.id || !request.id) return
+  busy.value = true
+  try {
+    const source = requestActionSource(request)
+    const requests = (collection.requests ?? []).map((item) => item.id === source.id ? source : item)
+    const ordered = [source, ...requests.filter((item) => item.id !== source.id)]
+    await saveOrderedRequests(collection.id, ordered)
+    statusMessage.value = t.value.requestPinned
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function duplicateRequestFromMenu(request: domain.Request) {
+  const collection = collectionForRequest(request)
+  if (!collection?.id || !request.id) return
+  busy.value = true
+  try {
+    const source = requestActionSource(request)
+    const duplicate = normalizeRequest(cloneRequest(source))
+    duplicate.id = crypto.randomUUID()
+    duplicate.collectionId = collection.id
+    duplicate.name = `${source.name || t.value.requestName} ${t.value.copySuffix}`
+    duplicate.sortOrder = (source.sortOrder ?? 0) + 1
+    syncFormBody(duplicate)
+
+    const ordered: domain.Request[] = []
+    const existing = (collection.requests ?? []).map((item) => item.id === source.id ? source : item)
+    for (const item of existing) {
+      ordered.push(item)
+      if (item.id === source.id) ordered.push(duplicate)
+    }
+    if (!ordered.some((item) => item.id === duplicate.id)) ordered.push(duplicate)
+
+    const next = await saveOrderedRequests(collection.id, ordered)
+    const created = next?.collections
+      ?.find((item) => item.id === collection.id)
+      ?.requests
+      ?.find((item) => item.id === duplicate.id)
+    if (created) selectRequest(created)
+    statusMessage.value = t.value.requestCopied
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function deleteRequestFromMenu(request: domain.Request) {
+  if (!request.id) return
+  busy.value = true
+  try {
+    const next = await DeleteRequest(request.id)
+    if (activeRequest.value?.id === request.id) {
+      activeRequest.value = null
+      response.value = null
+    }
+    setState(next)
+    statusMessage.value = t.value.requestDeleted
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
+}
+
 async function saveEnvironmentDraft() {
   const env = new domain.Environment({
     id: envDraft.id,
@@ -846,6 +957,10 @@ function closeWindow() {
         @open-postman-modal="openPostmanModal"
         @export-collection="exportCollection"
         @select-request="selectRequest"
+        @generate-request-code="openRequestCodeModal"
+        @pin-request="pinRequestToTop"
+        @duplicate-request="duplicateRequestFromMenu"
+        @delete-request="deleteRequestFromMenu"
         @create-environment="createEnvironment"
         @select-environment="setEnvironment"
         @select-global-environment="selectGlobalEnvironment"
@@ -971,5 +1086,13 @@ function closeWindow() {
     :export-text="exportText"
     @close="closeModal"
     @submit="submitActiveModal"
+  />
+
+  <RequestCodeModal
+    :visible="!!codeModalRequest"
+    :request="codeModalRequest"
+    :t="t"
+    @update:visible="setCodeModalVisible"
+    @copied="markCodeCopied"
   />
 </template>

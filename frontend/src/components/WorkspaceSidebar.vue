@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
-import { Activity, ChevronDown, CircleAlert, Download, Globe2, Import, MoreHorizontal, Pencil, Plus, Radio, Trash2, X } from 'lucide-vue-next'
+import { Activity, ChevronDown, CircleAlert, Code2, Copy, Download, Globe2, Import, MoreHorizontal, Pencil, Pin, Plus, Radio, Trash2, X } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import type { NavKey } from '../types'
@@ -44,6 +44,10 @@ const emit = defineEmits<{
   openPostmanModal: []
   exportCollection: []
   selectRequest: [request: domain.Request]
+  generateRequestCode: [request: domain.Request]
+  pinRequest: [request: domain.Request]
+  duplicateRequest: [request: domain.Request]
+  deleteRequest: [request: domain.Request]
   createEnvironment: []
   selectEnvironment: [id: string]
   selectGlobalEnvironment: []
@@ -52,13 +56,18 @@ const emit = defineEmits<{
 }>()
 
 const environmentMenuId = ref('')
+const requestMenuId = ref('')
+const pendingDeleteRequestId = ref('')
 const editingEnvironmentId = ref('')
 const editingEnvironmentName = ref('')
 const environmentRenameInput = ref<InstanceType<typeof VoltInputText> | null>(null)
 const collectionPickerPopover = ref<InstanceType<typeof VoltPopover> | null>(null)
 const addMenuPopover = ref<InstanceType<typeof VoltPopover> | null>(null)
 const optionsMenuPopover = ref<InstanceType<typeof VoltPopover> | null>(null)
-const environmentMenuPopover = ref<InstanceType<typeof VoltPopover> | null>(null)
+const requestMenuPopover = ref<InstanceType<typeof VoltPopover> | InstanceType<typeof VoltPopover>[] | null>(null)
+const environmentMenuPopover = ref<InstanceType<typeof VoltPopover> | InstanceType<typeof VoltPopover>[] | null>(null)
+const requestMenuAnchor = ref<HTMLElement | null>(null)
+const environmentMenuAnchor = ref<HTMLElement | null>(null)
 
 function toggleCollectionPicker(event: Event) {
   collectionPickerPopover.value?.toggle(event)
@@ -86,7 +95,18 @@ function toggleOptionsMenu(event: Event) {
 
 function closeEnvironmentMenu() {
   environmentMenuId.value = ''
-  environmentMenuPopover.value?.hide()
+  currentEnvironmentMenuPopover()?.hide()
+}
+
+function closeRequestMenu(resetDelete = true) {
+  requestMenuId.value = ''
+  if (resetDelete) pendingDeleteRequestId.value = ''
+  currentRequestMenuPopover()?.hide()
+}
+
+function handleRequestMenuHide() {
+  requestMenuId.value = ''
+  pendingDeleteRequestId.value = ''
 }
 
 function closeActionMenus() {
@@ -136,8 +156,62 @@ function exportCollection() {
 function openEnvironmentMenu(event: MouseEvent, environment: domain.Environment) {
   event.preventDefault()
   event.stopPropagation()
+  const target = environmentMenuAnchor.value ?? event.currentTarget as HTMLElement
+  if (environmentMenuAnchor.value) {
+    environmentMenuAnchor.value.style.left = `${event.clientX + 6}px`
+    environmentMenuAnchor.value.style.top = `${event.clientY + 6}px`
+  }
   environmentMenuId.value = environment.id
-  void nextTick(() => environmentMenuPopover.value?.show(event))
+  void nextTick(() => currentEnvironmentMenuPopover()?.show(event, target))
+}
+
+function openRequestMenu(event: MouseEvent, request: domain.Request) {
+  event.preventDefault()
+  event.stopPropagation()
+  const target = requestMenuAnchor.value ?? event.currentTarget as HTMLElement
+  if (requestMenuAnchor.value) {
+    requestMenuAnchor.value.style.left = `${event.clientX + 6}px`
+    requestMenuAnchor.value.style.top = `${event.clientY + 6}px`
+  }
+  pendingDeleteRequestId.value = ''
+  requestMenuId.value = request.id
+  void nextTick(() => currentRequestMenuPopover()?.show(event, target))
+}
+
+function currentRequestMenuPopover() {
+  return Array.isArray(requestMenuPopover.value)
+    ? requestMenuPopover.value[0]
+    : requestMenuPopover.value
+}
+
+function currentEnvironmentMenuPopover() {
+  return Array.isArray(environmentMenuPopover.value)
+    ? environmentMenuPopover.value[0]
+    : environmentMenuPopover.value
+}
+
+function generateRequestCode(request: domain.Request) {
+  closeRequestMenu()
+  emit('generateRequestCode', request)
+}
+
+function pinRequest(request: domain.Request) {
+  closeRequestMenu()
+  emit('pinRequest', request)
+}
+
+function duplicateRequest(request: domain.Request) {
+  closeRequestMenu()
+  emit('duplicateRequest', request)
+}
+
+function deleteRequest(request: domain.Request) {
+  if (pendingDeleteRequestId.value !== request.id) {
+    pendingDeleteRequestId.value = request.id
+    return
+  }
+  closeRequestMenu()
+  emit('deleteRequest', request)
 }
 
 function selectEnvironment(id: string) {
@@ -302,21 +376,52 @@ function deleteEnvironment(id: string) {
 
     <template v-if="activeNav === 'collections'">
       <div class="request-list">
+        <span ref="requestMenuAnchor" class="context-menu-anchor" aria-hidden="true"></span>
         <VoltButton
           v-for="request in filteredRequests"
           :key="request.id"
           :class="['request-row', { active: request.id === activeRequest?.id }]"
           @click="emit('selectRequest', request)"
+          @contextmenu="openRequestMenu($event, request)"
         >
           <span :class="['method', request.method.toLowerCase()]">{{ request.method }}</span>
           <span class="truncate">{{ request.name }}</span>
         </VoltButton>
+        <VoltPopover
+          v-if="requestMenuId"
+          ref="requestMenuPopover"
+          content-class="action-menu"
+          @hide="handleRequestMenuHide"
+        >
+          <template v-for="request in filteredRequests" :key="request.id">
+            <template v-if="requestMenuId === request.id">
+              <VoltButton variant="ghost" @click="generateRequestCode(request)">
+                <Code2 :size="14" />
+                {{ t.generateCode }}
+              </VoltButton>
+              <VoltButton variant="ghost" @click="pinRequest(request)">
+                <Pin :size="14" />
+                {{ t.pinToTop }}
+              </VoltButton>
+              <VoltButton variant="ghost" @click="duplicateRequest(request)">
+                <Copy :size="14" />
+                {{ t.duplicate }}
+              </VoltButton>
+              <VoltButton class="danger-menu-item" variant="ghost" @click="deleteRequest(request)">
+                <CircleAlert v-if="pendingDeleteRequestId === request.id" :size="14" />
+                <Trash2 v-else :size="14" />
+                {{ pendingDeleteRequestId === request.id ? t.confirmDeleteRequest : t.delete }}
+              </VoltButton>
+            </template>
+          </template>
+        </VoltPopover>
         <div v-if="!activeCollection" class="side-note">{{ t.createOrSelect }}</div>
       </div>
     </template>
 
     <template v-else-if="activeNav === 'environments'">
       <div class="request-list">
+        <span ref="environmentMenuAnchor" class="context-menu-anchor" aria-hidden="true"></span>
         <VoltButton
           :class="['request-row', 'environment-row', 'global-environment-row', { active: environmentPanel === 'globals' }]"
           variant="ghost"
@@ -357,7 +462,7 @@ function deleteEnvironment(id: string) {
           <VoltPopover
             v-if="environmentMenuId === env.id"
             ref="environmentMenuPopover"
-            content-class="action-menu environment-menu"
+            content-class="action-menu"
             @hide="environmentMenuId = ''"
           >
             <VoltButton variant="ghost" @click="startEditingEnvironment(env)">

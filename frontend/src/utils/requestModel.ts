@@ -59,6 +59,7 @@ export function normalizeRequest(request: domain.Request) {
   request.params = request.params.map(normalizeKeyValue)
   request.headers = request.headers.map(normalizeKeyValue)
   request.proxy = normalizeProxy(request.proxy, 'inherit')
+  request.proxy.noProxy = ''
   if (request.bodyMode === 'form') {
     request.formItems = normalizeFormItems(request.formItems ?? [], request.body ?? '')
     request.body = formItemsToBody(request.formItems)

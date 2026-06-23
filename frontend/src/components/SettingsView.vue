@@ -20,7 +20,7 @@ const emit = defineEmits<{
 
 <template>
   <div class="section-header">
-    <div><h2>{{ t.settings }}</h2><p>{{ t.settingsHelp }}</p></div>
+    <div><h2>{{ t.settings }}</h2></div>
     <VoltButton class="toolbar-btn" @click="emit('saveSettings')">{{ t.save }}</VoltButton>
   </div>
   <div class="settings-sections">

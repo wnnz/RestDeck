@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +22,6 @@ type Store struct {
 }
 
 var executablePath = os.Executable
-var userConfigDir = os.UserConfigDir
 
 func Open(ctx context.Context) (*Store, error) {
 	dir, err := dataDir()
@@ -31,9 +29,6 @@ func Open(ctx context.Context) (*Store, error) {
 		return nil, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
-	}
-	if err := migrateLegacyDatabase(dir); err != nil {
 		return nil, err
 	}
 
@@ -82,44 +77,6 @@ func dataDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(filepath.Dir(exe), "Data"), nil
-}
-
-func migrateLegacyDatabase(dir string) error {
-	target := filepath.Join(dir, "restdeck.db")
-	if _, err := os.Stat(target); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	base, err := userConfigDir()
-	if err != nil {
-		return nil
-	}
-	legacy := filepath.Join(base, "RestDeck", "restdeck.db")
-	if _, err := os.Stat(legacy); errors.Is(err, os.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	src, err := os.Open(legacy)
-	if err != nil {
-		return fmt.Errorf("open legacy database %q: %w", legacy, err)
-	}
-	defer src.Close()
-	dst, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		return fmt.Errorf("create data database %q: %w", target, err)
-	}
-	if _, err := io.Copy(dst, src); err != nil {
-		_ = dst.Close()
-		_ = os.Remove(target)
-		return fmt.Errorf("copy legacy database to Data: %w", err)
-	}
-	if err := dst.Close(); err != nil {
-		_ = os.Remove(target)
-		return err
-	}
-	return nil
 }
 
 func (s *Store) migrate(ctx context.Context) error {

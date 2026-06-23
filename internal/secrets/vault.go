@@ -18,16 +18,18 @@ type Vault struct {
 	key []byte
 }
 
+var executablePath = os.Executable
+
 func Open() (*Vault, error) {
-	dir, err := os.UserConfigDir()
+	exe, err := executablePath()
 	if err != nil {
 		return nil, err
 	}
-	appDir := filepath.Join(dir, "RestDeck")
-	if err := os.MkdirAll(appDir, 0o755); err != nil {
+	dataDir := filepath.Join(filepath.Dir(exe), "Data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, err
 	}
-	keyPath := filepath.Join(appDir, "secret.key")
+	keyPath := filepath.Join(dataDir, "secret.key")
 	key, err := os.ReadFile(keyPath)
 	if errors.Is(err, os.ErrNotExist) {
 		key = make([]byte, 32)

@@ -72,7 +72,19 @@ function updateValue(value: string) {
 }
 
 function inputElement() {
-  return inputRef.value?.input ?? null
+  return resolveInputElement(inputRef.value?.input)
+}
+
+function resolveInputElement(raw: unknown): HTMLInputElement | HTMLTextAreaElement | null {
+  if (raw instanceof HTMLInputElement || raw instanceof HTMLTextAreaElement) return raw
+  if (raw instanceof HTMLElement) {
+    if (raw.matches('input, textarea')) return raw as HTMLInputElement | HTMLTextAreaElement
+    return raw.querySelector('input, textarea')
+  }
+  if (raw && typeof raw === 'object' && '$el' in raw) {
+    return resolveInputElement((raw as { $el?: unknown }).$el)
+  }
+  return null
 }
 
 function handleInput(event: Event) {

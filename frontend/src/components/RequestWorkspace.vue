@@ -312,10 +312,6 @@ function newFormItem() {
                   <span>{{ t.proxyUrl }}</span>
                   <VariableSuggestInput v-model="activeRequest.proxy.url" :suggestions="variableSuggestions" placeholder="http://127.0.0.1:7890" />
                 </label>
-                <label v-if="activeRequest.proxy.mode === 'custom'" class="settings-field">
-                  <span>{{ t.proxyNoProxy }}</span>
-                  <VariableSuggestInput v-model="activeRequest.proxy.noProxy" :suggestions="variableSuggestions" placeholder="localhost,127.0.0.1" />
-                </label>
               </div>
             </section>
           </div>

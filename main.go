@@ -25,8 +25,7 @@ func main() {
 		MinHeight: 680,
 		Frameless: true,
 		Windows: &windows.Options{
-			DisableWindowIcon:                 true,
-			DisableFramelessWindowDecorations: true,
+			DisableWindowIcon: true,
 		},
 		AssetServer: &assetserver.Options{
 			Assets: assets,
