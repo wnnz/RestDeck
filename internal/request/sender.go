@@ -38,6 +38,60 @@ func NewSender() *Sender {
 	}
 }
 
+func (s *Sender) LoadCookies(cookies []domain.Cookie) {
+	if s == nil || s.client == nil || s.client.Jar == nil {
+		return
+	}
+	for _, cookie := range cookies {
+		host := strings.TrimSpace(cookie.Domain)
+		if host == "" || cookie.Name == "" {
+			continue
+		}
+		host = strings.TrimPrefix(host, ".")
+		scheme := "http"
+		if cookie.Secure {
+			scheme = "https"
+		}
+		u := &url.URL{Scheme: scheme, Host: host, Path: "/"}
+		path := cookie.Path
+		if path == "" {
+			path = "/"
+		}
+		s.client.Jar.SetCookies(u, []*http.Cookie{{
+			Name:     cookie.Name,
+			Value:    cookie.Value,
+			Path:     path,
+			Domain:   cookie.Domain,
+			Expires:  cookie.Expires,
+			HttpOnly: cookie.HTTPOnly,
+			Secure:   cookie.Secure,
+		}})
+	}
+}
+
+func (s *Sender) CookiesForURL(rawURL string) []domain.Cookie {
+	if s == nil || s.client == nil || s.client.Jar == nil {
+		return nil
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return nil
+	}
+	out := []domain.Cookie{}
+	for _, cookie := range s.client.Jar.Cookies(u) {
+		out = append(out, domain.Cookie{
+			Name:     cookie.Name,
+			Value:    cookie.Value,
+			Domain:   u.Hostname(),
+			Path:     fallbackPath(cookie.Path),
+			Expires:  cookie.Expires,
+			HTTPOnly: cookie.HttpOnly,
+			Secure:   cookie.Secure,
+		})
+	}
+	return out
+}
+
 func (s *Sender) Send(ctx context.Context, req domain.Request, env domain.Environment, globals []domain.KeyValue) (domain.Response, error) {
 	resolver := NewResolver(env, globals)
 	variables, err := resolver.ValuesWithError()
@@ -104,11 +158,19 @@ func (s *Sender) SendWithVariablesAndProxy(ctx context.Context, req domain.Reque
 
 	cookies := []domain.Cookie{}
 	for _, cookie := range httpRes.Cookies() {
+		path := cookie.Path
+		if path == "" {
+			path = "/"
+		}
+		domainName := cookie.Domain
+		if domainName == "" {
+			domainName = httpReq.URL.Hostname()
+		}
 		cookies = append(cookies, domain.Cookie{
 			Name:     cookie.Name,
 			Value:    cookie.Value,
-			Domain:   cookie.Domain,
-			Path:     cookie.Path,
+			Domain:   domainName,
+			Path:     path,
 			Expires:  cookie.Expires,
 			HTTPOnly: cookie.HttpOnly,
 			Secure:   cookie.Secure,
@@ -405,6 +467,13 @@ func randomNonce() string {
 
 func escapeHeader(value string) string {
 	return strings.ReplaceAll(value, `"`, `\"`)
+}
+
+func fallbackPath(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return "/"
+	}
+	return path
 }
 
 func FormatBody(contentType, body string) string {

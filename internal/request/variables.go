@@ -339,6 +339,10 @@ func extractJSONPath(raw, path string) (string, bool, error) {
 	return stringifyJSONPathValue(current), true, nil
 }
 
+func ExtractJSONPath(raw, path string) (string, bool, error) {
+	return extractJSONPath(raw, path)
+}
+
 func stringifyJSONPathValue(value interface{}) string {
 	switch v := value.(type) {
 	case string:

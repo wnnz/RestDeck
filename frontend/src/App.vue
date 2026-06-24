@@ -7,25 +7,32 @@ import {
   Play,
   Settings
 } from 'lucide-vue-next'
-import { Quit, WindowMinimise, WindowToggleMaximise } from '../wailsjs/runtime/runtime'
+import { ClipboardSetText, Quit, WindowMinimise, WindowToggleMaximise } from '../wailsjs/runtime/runtime'
 import {
+  ClearCookies,
   CreateCollection,
+  CreateResponseVariable,
   CreateEnvironment,
   DeleteCollection,
+  DeleteCookie,
   DeleteEnvironment,
   DeleteRequest,
+  ExportOpenAPICollection,
   ExportPostmanCollection,
   ExportPostmanRequest,
   FormatBody,
   GetState,
   ImportCurlRequest,
   ImportFetchRequest,
+  ImportOpenAPICollection,
   ImportPostmanCollection,
+  QueryJSONPath,
   SaveCollection,
   SaveEnvironment,
   SaveGlobals,
   SaveRequest,
   SaveSettings,
+  SaveTextFile,
   SelectFile,
   SendRequest,
   SetActiveEnvironment,
@@ -50,6 +57,7 @@ import { messages } from './i18n/messages'
 import type { ActiveModal, JsonToken, Language, NavKey, RequestTab, ResponseTab, ResponseView, Theme, VariableSuggestion } from './types'
 import { formatError } from './utils/format'
 import { tokenizeJSON } from './utils/jsonHighlight'
+import { jsonPathOptions } from './utils/jsonPathOptions'
 import {
   authBadgeCount,
   cloneKeyValues,
@@ -80,6 +88,7 @@ const realtimeBusy = ref(false)
 const statusMessage = ref('')
 const activeModal = ref<ActiveModal>(null)
 const postmanText = ref('')
+const openAPIText = ref('')
 const fetchText = ref('')
 const curlText = ref('')
 const collectionPickerOpen = ref(false)
@@ -89,6 +98,10 @@ const editingCollectionName = ref('')
 const pendingDeleteCollectionId = ref('')
 const exportText = ref('')
 const codeModalRequest = ref<domain.Request | null>(null)
+const responseSearch = ref('')
+const responseJSONPath = ref('$.')
+const responseJSONPathResult = ref('')
+const responseVariableKey = ref('')
 const wsDraft = reactive({
   url: 'wss://echo.websocket.events',
   message: '{ "hello": "restdeck" }',
@@ -153,6 +166,8 @@ const activeModalTitle = computed(() => {
       return t.value.importFetchRequest
     case 'curl':
       return t.value.importCurlRequest
+    case 'openapi':
+      return t.value.importOpenAPICollection
     case 'postman':
       return t.value.importPostmanCollection
     case 'export':
@@ -174,13 +189,18 @@ const {
   runnerIterations,
   runnerRequestId,
   runnerQueue,
+  runnerFailurePolicy,
+  runnerStopRequested,
   ensureRunnerRequest,
   setRunnerRequest,
   selectRunnerRequest,
   setRunnerScope,
   setRunnerIterations,
+  setRunnerFailurePolicy,
+  stopRunner,
   runActiveCollection,
-  runRunnerRequest
+  runRunnerRequest,
+  runnerReportText
 } = useRunnerController({
   activeCollection,
   activeEnvironment,
@@ -219,6 +239,14 @@ const highlightedResponseBody = computed<JsonToken[]>(() => {
   }
   return tokenizeJSON(prettyResponseBody.value)
 })
+
+const responseSearchMatches = computed(() => {
+  const keyword = responseSearch.value.trim().toLowerCase()
+  if (!keyword || !prettyResponseBody.value) return 0
+  return prettyResponseBody.value.toLowerCase().split(keyword).length - 1
+})
+
+const responseJSONPathOptions = computed(() => jsonPathOptions(response.value?.body ?? ''))
 
 const requestTabs = computed(() => [
   { key: 'params' as RequestTab, label: t.value.params, count: activeRequest.value?.params?.filter((item) => item.enabled && item.key).length ?? 0 },
@@ -890,6 +918,23 @@ async function importPostmanCollection() {
   }
 }
 
+async function importOpenAPICollection() {
+  if (!openAPIText.value.trim()) return
+  await flushRequestAutosave()
+  busy.value = true
+  try {
+    const next = await ImportOpenAPICollection(openAPIText.value)
+    setState(next)
+    activeModal.value = null
+    openAPIText.value = ''
+    statusMessage.value = t.value.openAPIImported
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
+}
+
 async function importFetchRequest() {
   if (!fetchText.value.trim()) return
   await flushRequestAutosave()
@@ -943,6 +988,17 @@ function openPostmanModal() {
   activeModal.value = 'postman'
 }
 
+function openOpenAPIModal() {
+  closeCollectionMenus()
+  openAPIText.value = JSON.stringify({
+    openapi: '3.0.3',
+    info: { title: 'Imported API', version: '1.0.0' },
+    servers: [{ url: '{{baseUrl}}' }],
+    paths: {}
+  }, null, 2)
+  activeModal.value = 'openapi'
+}
+
 function openFetchModal() {
   closeCollectionMenus()
   fetchText.value = `fetch("https://api.example.com/v1/resource", {
@@ -967,6 +1023,7 @@ function closeModal() {
 
 function submitActiveModal() {
   if (activeModal.value === 'postman') return importPostmanCollection()
+  if (activeModal.value === 'openapi') return importOpenAPICollection()
   if (activeModal.value === 'fetch') return importFetchRequest()
   if (activeModal.value === 'curl') return importCurlRequest()
 }
@@ -980,6 +1037,20 @@ async function exportCollection() {
     activeModal.value = 'export'
     closeCollectionMenus()
     statusMessage.value = t.value.collectionExported
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
+
+async function exportOpenAPICollection() {
+  const collection = activeCollection.value
+  if (!collection) return
+  await flushRequestAutosave()
+  try {
+    exportText.value = await ExportOpenAPICollection(collection.id)
+    activeModal.value = 'export'
+    closeCollectionMenus()
+    statusMessage.value = t.value.openAPIExported
   } catch (error) {
     statusMessage.value = formatError(error)
   }
@@ -1041,6 +1112,44 @@ function setCodeModalVisible(value: boolean) {
 
 function markCodeCopied() {
   statusMessage.value = t.value.codeCopied
+}
+
+async function copyRunnerReport() {
+  try {
+    await ClipboardSetText(runnerReportText())
+    statusMessage.value = t.value.runnerReportCopied
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
+
+async function exportRunnerReport() {
+  try {
+    const path = await SaveTextFile(t.value.exportReport, 'restdeck-runner-report.md', runnerReportText())
+    if (path) statusMessage.value = path
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
+
+async function deleteCookie(cookie: domain.Cookie) {
+  try {
+    const next = await DeleteCookie(cookie)
+    setState(next)
+    statusMessage.value = t.value.cookieDeleted
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
+
+async function clearCookies() {
+  try {
+    const next = await ClearCookies()
+    setState(next)
+    statusMessage.value = t.value.cookiesCleared
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
 }
 
 async function pinRequestToTop(request: domain.Request) {
@@ -1259,6 +1368,55 @@ function setTheme(value: Theme) {
   theme.value = value
 }
 
+async function runResponseJSONPathQuery() {
+  if (!response.value?.body || !responseJSONPath.value.trim()) return
+  try {
+    responseJSONPathResult.value = await QueryJSONPath(response.value.body, responseJSONPath.value.trim())
+  } catch (error) {
+    responseJSONPathResult.value = ''
+    statusMessage.value = formatError(error)
+  }
+}
+
+async function copyResponseValue(value: string) {
+  try {
+    await ClipboardSetText(value)
+    statusMessage.value = t.value.jsonPathCopied
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
+
+async function saveResponseBody() {
+  if (!response.value) return
+  try {
+    const path = await SaveTextFile(t.value.saveResponse, 'restdeck-response.txt', response.value.body ?? '')
+    if (path) statusMessage.value = t.value.responseSaved
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
+
+async function createResponseVariable() {
+  if (!activeRequest.value?.id || !responseJSONPath.value.trim()) return
+  try {
+    const key = responseVariableKey.value.trim() || responseJSONPath.value.trim().split(/[.[\]]/).filter(Boolean).pop() || 'responseValue'
+    const next = await CreateResponseVariable(activeEnvironment.value?.id ?? '', key, activeRequest.value.id, responseJSONPath.value.trim(), responseJSONPathResult.value)
+    setState(next)
+    const updatedEnv = activeEnvironment.value
+    if (updatedEnv) {
+      envDraft.id = updatedEnv.id
+      envDraft.name = updatedEnv.name
+      envDraft.variables = cloneKeyValues(updatedEnv.variables ?? [])
+      lastEnvironmentAutosaveSnapshot = environmentDraftSnapshot()
+    }
+    responseVariableKey.value = ''
+    statusMessage.value = t.value.responseVariableCreated
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
+
 function setAuthType(value: string) {
   if (!activeRequest.value) return
   activeRequest.value.auth = new domain.AuthConfig({ type: value, values: defaultAuthValues(value) })
@@ -1327,7 +1485,9 @@ async function closeWindow() {
         @open-fetch-modal="openFetchModal"
         @open-curl-modal="openCurlModal"
         @open-postman-modal="openPostmanModal"
+        @open-open-a-p-i-modal="openOpenAPIModal"
         @export-collection="exportCollection"
+        @export-open-a-p-i-collection="exportOpenAPICollection"
         @select-request="selectRequest"
         @generate-request-code="openRequestCodeModal"
         @export-request="exportRequestFromMenu"
@@ -1359,6 +1519,12 @@ async function closeWindow() {
           :response-tabs="responseTabs"
           :highlighted-response-body="highlightedResponseBody"
           :pretty-response-body="prettyResponseBody"
+          v-model:response-search="responseSearch"
+          v-model:responseJSONPath="responseJSONPath"
+          v-model:response-variable-key="responseVariableKey"
+          :response-search-matches="responseSearchMatches"
+          :responseJSONPathResult="responseJSONPathResult"
+          :responseJSONPathOptions="responseJSONPathOptions"
           :busy="busy"
           :methods="methods"
           :auth-types="authTypes"
@@ -1373,6 +1539,10 @@ async function closeWindow() {
           @remove-form-item="removeFormItem"
           @select-form-file="selectFormFile"
           @set-auth-type="setAuthType"
+          @query-json-path="runResponseJSONPathQuery"
+          @copy-response-value="copyResponseValue"
+          @save-response="saveResponseBody"
+          @create-response-variable="createResponseVariable"
         />
 
         <EnvironmentsView
@@ -1407,12 +1577,17 @@ async function closeWindow() {
           :runner-result="runnerResult"
           :runner-queue="runnerQueue"
           :runner-busy="runnerBusy"
+          :runner-failure-policy="runnerFailurePolicy"
           @select-collection="selectCollectionById"
           @select-request="selectRunnerRequest"
           @set-scope="setRunnerScope"
           @set-iterations="setRunnerIterations"
+          @set-failure-policy="setRunnerFailurePolicy"
           @run-collection="runActiveCollection"
           @run-request="runRunnerRequest"
+          @stop-run="stopRunner"
+          @copy-report="copyRunnerReport"
+          @export-report="exportRunnerReport"
         />
 
         <RealtimeView
@@ -1433,6 +1608,9 @@ async function closeWindow() {
           v-model:language="language"
           v-model:settings-draft="settingsDraft"
           :t="t"
+          :cookies="state?.cookies ?? []"
+          @delete-cookie="deleteCookie"
+          @clear-cookies="clearCookies"
         />
       </section>
     </main>
@@ -1444,6 +1622,7 @@ async function closeWindow() {
 
   <ImportModal
     v-model:postman-text="postmanText"
+    v-model:open-a-p-i-text="openAPIText"
     v-model:fetch-text="fetchText"
     v-model:curl-text="curlText"
     :active-modal="activeModal"

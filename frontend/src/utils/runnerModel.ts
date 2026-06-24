@@ -24,8 +24,12 @@ export function buildRunnerQueue(requests: domain.Request[], iterations: number)
     method: request.method,
     name: request.name || request.url,
     url: request.url,
-    status: 'waiting' as const
+      status: 'waiting' as const
   })))
+}
+
+export function markPendingRunnerItems(items: RunnerQueueItem[], patch: Partial<RunnerQueueItem>) {
+  return items.map((item) => item.status === 'waiting' ? { ...item, ...patch } : item)
 }
 
 export function summarizeRunnerResponse(result: domain.Response, testsLabel: string) {

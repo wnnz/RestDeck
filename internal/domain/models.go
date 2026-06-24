@@ -170,6 +170,7 @@ type WorkspaceState struct {
 	Environments        []Environment `json:"environments"`
 	History             []HistoryItem `json:"history"`
 	Globals             []KeyValue    `json:"globals"`
+	Cookies             []Cookie      `json:"cookies"`
 	ActiveEnvironmentID string        `json:"activeEnvironmentId"`
 	Settings            Settings      `json:"settings"`
 }

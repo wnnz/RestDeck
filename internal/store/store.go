@@ -159,9 +159,20 @@ func (s *Store) migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS settings (
-			key TEXT PRIMARY KEY,
-			value TEXT NOT NULL
-		);`,
+				key TEXT PRIMARY KEY,
+				value TEXT NOT NULL
+			);`,
+		`CREATE TABLE IF NOT EXISTS cookies (
+				id TEXT PRIMARY KEY,
+				name TEXT NOT NULL,
+				value TEXT NOT NULL,
+				domain TEXT NOT NULL,
+				path TEXT NOT NULL DEFAULT '/',
+				expires TEXT NOT NULL DEFAULT '',
+				http_only INTEGER NOT NULL DEFAULT 0,
+				secure INTEGER NOT NULL DEFAULT 0,
+				updated_at TEXT NOT NULL
+			);`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
@@ -278,6 +289,10 @@ func (s *Store) State(ctx context.Context) (domain.WorkspaceState, error) {
 	if err != nil {
 		return domain.WorkspaceState{}, err
 	}
+	cookies, err := s.ListCookies(ctx)
+	if err != nil {
+		return domain.WorkspaceState{}, err
+	}
 	settings, err := s.GetSettings(ctx)
 	if err != nil {
 		return domain.WorkspaceState{}, err
@@ -294,6 +309,7 @@ func (s *Store) State(ctx context.Context) (domain.WorkspaceState, error) {
 		Environments:        environments,
 		History:             history,
 		Globals:             globals,
+		Cookies:             cookies,
 		ActiveEnvironmentID: active,
 		Settings:            settings,
 	}, nil
@@ -662,6 +678,78 @@ func (s *Store) SaveGlobals(ctx context.Context, globals []domain.KeyValue) erro
 		}
 	}
 	return tx.Commit()
+}
+
+func (s *Store) ListCookies(ctx context.Context) ([]domain.Cookie, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name, value, domain, path, expires, http_only, secure FROM cookies ORDER BY domain, path, name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.Cookie{}
+	now := time.Now()
+	for rows.Next() {
+		var cookie domain.Cookie
+		var expires string
+		var httpOnly, secure int
+		if err := rows.Scan(&cookie.Name, &cookie.Value, &cookie.Domain, &cookie.Path, &expires, &httpOnly, &secure); err != nil {
+			return nil, err
+		}
+		cookie.Expires = parseTime(expires)
+		if !cookie.Expires.IsZero() && cookie.Expires.Before(now) {
+			continue
+		}
+		cookie.HTTPOnly = httpOnly == 1
+		cookie.Secure = secure == 1
+		items = append(items, cookie)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) SaveCookies(ctx context.Context, cookies []domain.Cookie) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer rollback(tx)
+	for _, cookie := range cookies {
+		cookie.Name = strings.TrimSpace(cookie.Name)
+		cookie.Domain = strings.TrimSpace(cookie.Domain)
+		if cookie.Name == "" || cookie.Domain == "" {
+			continue
+		}
+		if cookie.Path == "" {
+			cookie.Path = "/"
+		}
+		if !cookie.Expires.IsZero() && cookie.Expires.Before(time.Now()) {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM cookies WHERE name = ? AND domain = ? AND path = ?`, cookie.Name, cookie.Domain, cookie.Path); err != nil {
+				return err
+			}
+			continue
+		}
+		id := cookie.Domain + "\n" + cookie.Path + "\n" + cookie.Name
+		if _, err := tx.ExecContext(ctx, `INSERT INTO cookies (id, name, value, domain, path, expires, http_only, secure, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET value = excluded.value, expires = excluded.expires,
+			http_only = excluded.http_only, secure = excluded.secure, updated_at = excluded.updated_at`,
+			id, cookie.Name, cookie.Value, cookie.Domain, cookie.Path, formatTime(cookie.Expires), boolInt(cookie.HTTPOnly), boolInt(cookie.Secure), formatTime(time.Now())); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteCookie(ctx context.Context, cookie domain.Cookie) error {
+	if cookie.Path == "" {
+		cookie.Path = "/"
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM cookies WHERE name = ? AND domain = ? AND path = ?`, cookie.Name, cookie.Domain, cookie.Path)
+	return err
+}
+
+func (s *Store) ClearCookies(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM cookies`)
+	return err
 }
 
 func (s *Store) AddHistory(ctx context.Context, item domain.HistoryItem) error {

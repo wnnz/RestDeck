@@ -532,6 +532,7 @@ export namespace domain {
 	    environments: Environment[];
 	    history: HistoryItem[];
 	    globals: KeyValue[];
+	    cookies: Cookie[];
 	    activeEnvironmentId: string;
 	    settings: Settings;
 	
@@ -545,6 +546,7 @@ export namespace domain {
 	        this.environments = this.convertValues(source["environments"], Environment);
 	        this.history = this.convertValues(source["history"], HistoryItem);
 	        this.globals = this.convertValues(source["globals"], KeyValue);
+	        this.cookies = this.convertValues(source["cookies"], Cookie);
 	        this.activeEnvironmentId = source["activeEnvironmentId"];
 	        this.settings = this.convertValues(source["settings"], Settings);
 	    }

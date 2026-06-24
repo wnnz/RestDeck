@@ -12,6 +12,7 @@ defineProps<{
   busy: boolean
   t: Translation
   postmanText: string
+  openAPIText: string
   fetchText: string
   curlText: string
   exportText: string
@@ -21,6 +22,7 @@ const emit = defineEmits<{
   close: []
   submit: []
   'update:postmanText': [value: string]
+  'update:openAPIText': [value: string]
   'update:fetchText': [value: string]
   'update:curlText': [value: string]
 }>()
@@ -45,6 +47,14 @@ function updateVisible(value: boolean) {
       :spellcheck="false"
       :aria-label="t.postmanJSON"
       @update:model-value="emit('update:postmanText', String($event))"
+    />
+    <VoltTextarea
+      v-else-if="activeModal === 'openapi'"
+      :model-value="openAPIText"
+      input-class="modal-textarea"
+      :spellcheck="false"
+      :aria-label="t.openAPIJSON"
+      @update:model-value="emit('update:openAPIText', String($event))"
     />
     <VoltTextarea
       v-else-if="activeModal === 'fetch'"

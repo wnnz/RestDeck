@@ -40,7 +40,9 @@ const emit = defineEmits<{
   openFetchModal: []
   openCurlModal: []
   openPostmanModal: []
+  openOpenAPIModal: []
   exportCollection: []
+  exportOpenAPICollection: []
   selectRequest: [request: domain.Request]
   generateRequestCode: [request: domain.Request]
   exportRequest: [request: domain.Request]
@@ -132,9 +134,19 @@ function openPostmanModal() {
   emit('openPostmanModal')
 }
 
+function openOpenAPIModal() {
+  closeActionMenus()
+  emit('openOpenAPIModal')
+}
+
 function exportCollection() {
   closeActionMenus()
   emit('exportCollection')
+}
+
+function exportOpenAPICollection() {
+  closeActionMenus()
+  emit('exportOpenAPICollection')
 }
 
 function openEnvironmentMenu(event: MouseEvent, environment: domain.Environment) {
@@ -316,7 +328,11 @@ function deleteEnvironment(id: string) {
             >
               <VoltButton variant="ghost" @click="openPostmanModal">
                 <Import :size="14" />
-                {{ t.import }}
+                {{ t.importFromPostman }}
+              </VoltButton>
+              <VoltButton variant="ghost" @click="openOpenAPIModal">
+                <Import :size="14" />
+                {{ t.importFromOpenAPI }}
               </VoltButton>
               <VoltButton variant="ghost" @click="openFetchModal">
                 <Import :size="14" />
@@ -328,7 +344,11 @@ function deleteEnvironment(id: string) {
               </VoltButton>
               <VoltButton variant="ghost" :disabled="!activeCollection" @click="exportCollection">
                 <Download :size="14" />
-                {{ t.export }}
+                Postman {{ t.export }}
+              </VoltButton>
+              <VoltButton variant="ghost" :disabled="!activeCollection" @click="exportOpenAPICollection">
+                <Download :size="14" />
+                OpenAPI {{ t.export }}
               </VoltButton>
             </VoltPopover>
           </div>

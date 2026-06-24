@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { CheckCircle2, Clock3, FileJson2, Loader2, Plus, Send, Trash2, Wand2, XCircle } from 'lucide-vue-next'
+import { CheckCircle2, Clipboard, Clock3, Download, FileJson2, Loader2, Plus, Search, Send, Trash2, Variable, Wand2, XCircle } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import VoltSelect from './volt/VoltSelect.vue'
 import JsonBodyEditor from './JsonBodyEditor.vue'
@@ -10,7 +10,7 @@ import VoltCheckbox from './volt/VoltCheckbox.vue'
 import VoltInputText from './volt/VoltInputText.vue'
 import VoltTabsBar from './volt/VoltTabsBar.vue'
 import type { Translation } from '../i18n/messages'
-import type { JsonToken, RequestTab, ResponseTab, ResponseView, VariableSuggestion } from '../types'
+import type { JsonPathOption, JsonToken, RequestTab, ResponseTab, ResponseView, VariableSuggestion } from '../types'
 import { formatBytes, responseStatusText, statusClass } from '../utils/format'
 
 const props = defineProps<{
@@ -21,6 +21,9 @@ const props = defineProps<{
   responseTabs: Array<{ key: ResponseTab; label: string; count: number }>
   highlightedResponseBody: JsonToken[]
   prettyResponseBody: string
+  responseSearchMatches: number
+  responseJSONPathResult: string
+  responseJSONPathOptions: JsonPathOption[]
   busy: boolean
   methods: string[]
   authTypes: Array<{ value: string; label: string }>
@@ -33,6 +36,9 @@ const activeRequest = defineModel<domain.Request | null>('activeRequest', { requ
 const activeRequestTab = defineModel<RequestTab>('activeRequestTab', { required: true })
 const activeResponseTab = defineModel<ResponseTab>('activeResponseTab', { required: true })
 const responseView = defineModel<ResponseView>('responseView', { required: true })
+const responseSearch = defineModel<string>('responseSearch', { required: true })
+const responseJSONPath = defineModel<string>('responseJSONPath', { required: true })
+const responseVariableKey = defineModel<string>('responseVariableKey', { required: true })
 const requestTitleInput = ref<InstanceType<typeof VoltInputText> | null>(null)
 
 const emit = defineEmits<{
@@ -44,6 +50,10 @@ const emit = defineEmits<{
   'remove-form-item': [index: number]
   'select-form-file': [index: number]
   'set-auth-type': [value: string]
+  'query-json-path': []
+  'copy-response-value': [value: string]
+  'save-response': []
+  'create-response-variable': []
 }>()
 
 const formEditorMode = ref<'table' | 'text'>('table')
@@ -56,6 +66,26 @@ const proxyModeOptions = computed(() => [
   { value: 'custom', label: props.t.proxyCustom }
 ])
 const editingRequestTitle = ref(false)
+const searchedResponseSegments = computed(() => {
+  const query = responseSearch.value.trim()
+  const source = props.prettyResponseBody
+  if (!query) return [{ text: source, match: false }]
+  const lowerSource = source.toLowerCase()
+  const lowerQuery = query.toLowerCase()
+  const segments: Array<{ text: string; match: boolean }> = []
+  let cursor = 0
+  let index = lowerSource.indexOf(lowerQuery)
+  while (index >= 0) {
+    if (index > cursor) segments.push({ text: source.slice(cursor, index), match: false })
+    segments.push({ text: source.slice(index, index + query.length), match: true })
+    cursor = index + query.length
+    index = lowerSource.indexOf(lowerQuery, cursor)
+  }
+  if (cursor < source.length) segments.push({ text: source.slice(cursor), match: false })
+  return segments.length ? segments : [{ text: source, match: false }]
+})
+
+const visibleJSONPathOptions = computed(() => props.responseJSONPathOptions.slice(0, 12))
 const requestTitleInputStyle = computed(() => {
   const text = activeRequest.value?.name || props.t.requestName
   const units = Array.from(text).reduce((total, char) => total + (char.charCodeAt(0) > 255 ? 2 : 1), 0)
@@ -365,13 +395,38 @@ function newFormItem() {
             <div class="empty-panel">{{ t.noResponse }}</div>
           </template>
           <template v-else-if="activeResponseTab === 'body'">
-            <div class="view-switch">
-              <VoltButton :class="{ active: responseView === 'pretty' }" @click="responseView = 'pretty'">{{ t.pretty }}</VoltButton>
-              <VoltButton :class="{ active: responseView === 'raw' }" @click="responseView = 'raw'">{{ t.raw }}</VoltButton>
-              <VoltButton :class="{ active: responseView === 'preview' }" @click="responseView = 'preview'">{{ t.preview }}</VoltButton>
-              <span class="pill">JSON</span>
+            <div class="response-tools">
+              <div class="view-switch">
+                <VoltButton :class="{ active: responseView === 'pretty' }" @click="responseView = 'pretty'">{{ t.pretty }}</VoltButton>
+                <VoltButton :class="{ active: responseView === 'raw' }" @click="responseView = 'raw'">{{ t.raw }}</VoltButton>
+                <VoltButton :class="{ active: responseView === 'preview' }" @click="responseView = 'preview'">{{ t.preview }}</VoltButton>
+                <span class="pill">JSON</span>
+              </div>
+              <div class="response-tool-line">
+                <div class="response-search-box">
+                  <Search :size="13" />
+                  <VoltInputText v-model="responseSearch" :placeholder="t.responseSearch" />
+                  <span>{{ responseSearchMatches }}</span>
+                </div>
+                <VoltButton variant="secondary" @click="emit('save-response')"><Download :size="14" /> {{ t.saveResponse }}</VoltButton>
+              </div>
+              <div class="response-tool-line">
+                <VoltInputText v-model="responseJSONPath" class="jsonpath-input" :placeholder="t.jsonPathQuery" />
+                <VoltButton variant="secondary" @click="emit('query-json-path')"><Search :size="14" /> {{ t.jsonPathQuery }}</VoltButton>
+                <VoltButton variant="secondary" :disabled="!responseJSONPathResult" @click="emit('copy-response-value', responseJSONPathResult)"><Clipboard :size="14" /> {{ t.copyValue }}</VoltButton>
+                <VoltInputText v-model="responseVariableKey" class="response-variable-input" :placeholder="t.key" />
+                <VoltButton variant="secondary" :disabled="!responseJSONPath.trim()" @click="emit('create-response-variable')"><Variable :size="14" /> {{ t.createVariableFromResponse }}</VoltButton>
+              </div>
+              <div v-if="visibleJSONPathOptions.length" class="jsonpath-options">
+                <button v-for="option in visibleJSONPathOptions" :key="option.path" type="button" @click="responseJSONPath = option.path">
+                  <code>{{ option.path }}</code>
+                  <span>{{ option.preview }}</span>
+                </button>
+              </div>
+              <code v-if="responseJSONPathResult" class="jsonpath-result">{{ responseJSONPathResult }}</code>
             </div>
             <iframe v-if="responseView === 'preview'" :srcdoc="response.body" />
+            <pre v-else-if="responseSearch.trim()" class="json-highlight"><span v-for="(segment, index) in searchedResponseSegments" :key="index" :class="{ 'search-match': segment.match }">{{ segment.text }}</span></pre>
             <pre v-else-if="responseView === 'pretty'" class="json-highlight"><span v-for="(token, index) in highlightedResponseBody" :key="index" :class="`json-${token.type}`">{{ token.text }}</span></pre>
             <pre v-else>{{ prettyResponseBody }}</pre>
           </template>

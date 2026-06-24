@@ -687,6 +687,104 @@ button {
   background: var(--panel);
 }
 
+.response-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--subtle-bg);
+}
+
+.response-tool-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.response-search-box {
+  display: grid;
+  grid-template-columns: auto minmax(140px, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 220px;
+  height: 30px;
+  padding: 0 7px;
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--muted);
+}
+
+.response-search-box .volt-input {
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.jsonpath-input {
+  flex: 1;
+  min-width: 170px;
+}
+
+.response-variable-input {
+  width: 160px;
+}
+
+.jsonpath-result {
+  display: block;
+  max-height: 72px;
+  overflow: auto;
+  padding: 7px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--panel);
+  white-space: pre-wrap;
+}
+
+.jsonpath-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 6px;
+}
+
+.jsonpath-options button {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.8fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.jsonpath-options button:hover {
+  border-color: var(--accent-soft);
+  background: var(--accent-bg);
+}
+
+.jsonpath-options code,
+.jsonpath-options span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-match {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
 .kv-table {
   min-width: 660px;
 }
@@ -1512,7 +1610,7 @@ iframe {
 
 .runner-results {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -1621,6 +1719,42 @@ iframe {
 .runner-status.failed {
   background: color-mix(in srgb, #ef4444 14%, transparent);
   color: #dc2626;
+}
+
+.runner-status.skipped {
+  background: var(--hover-bg);
+  color: var(--muted);
+}
+
+.runner-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.runner-stop-button {
+  border-color: #dc2626;
+  background: #dc2626;
+}
+
+.cookie-table {
+  min-width: 700px;
+}
+
+.kv-table.spacious.cookie-table {
+  margin: 10px 0 18px;
+}
+
+.cookie-head,
+.cookie-row {
+  grid-template-columns: minmax(120px, 0.9fr) minmax(160px, 1fr) minmax(80px, 0.5fr) minmax(220px, 1.5fr) 36px;
+}
+
+.cookie-row code,
+.cookie-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .variable-input-wrap {

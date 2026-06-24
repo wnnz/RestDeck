@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CheckCircle2, Clock3, Loader2, Play, XCircle } from 'lucide-vue-next'
+import { CheckCircle2, Clipboard, Clock3, Download, Loader2, OctagonMinus, Play, Square, XCircle } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
-import type { RunnerQueueItem } from '../types'
+import type { RunnerFailurePolicy, RunnerQueueItem } from '../types'
 import VoltSelect from './volt/VoltSelect.vue'
 import VoltButton from './volt/VoltButton.vue'
 import VoltInputText from './volt/VoltInputText.vue'
@@ -21,6 +21,7 @@ const props = defineProps<{
   runnerResult: domain.RunnerResult | null
   runnerQueue: RunnerQueueItem[]
   runnerBusy: boolean
+  runnerFailurePolicy: RunnerFailurePolicy
 }>()
 
 const emit = defineEmits<{
@@ -28,8 +29,12 @@ const emit = defineEmits<{
   selectRequest: [id: string]
   setScope: [scope: 'collection' | 'request']
   setIterations: [iterations: number]
+  setFailurePolicy: [policy: RunnerFailurePolicy]
   runCollection: []
   runRequest: []
+  stopRun: []
+  copyReport: []
+  exportReport: []
 }>()
 
 const collectionRequests = computed(() => props.activeCollection?.requests ?? [])
@@ -43,7 +48,12 @@ const scopeOptions = computed(() => [
   { value: 'collection', label: props.t.runCollection },
   { value: 'request', label: props.t.runRequest }
 ])
+const failurePolicyOptions = computed(() => [
+  { value: 'continue', label: props.t.continueOnFailure },
+  { value: 'stopOnFailure', label: props.t.stopOnFailure }
+])
 const displayQueue = computed(() => props.runnerQueue.length ? props.runnerQueue : previewQueue.value)
+const hasReport = computed(() => props.runnerQueue.length > 0 && !props.runnerBusy)
 const previewQueue = computed<RunnerQueueItem[]>(() => {
   const requests = props.runnerScope === 'collection' ? collectionRequests.value : (selectedRequest.value ? [selectedRequest.value] : [])
   return Array.from({ length: props.runnerScope === 'collection' ? props.runnerIterations : 1 }).flatMap((_, iterationIndex) => requests.map((request) => ({
@@ -61,6 +71,7 @@ function statusLabel(status: RunnerQueueItem['status']) {
   if (status === 'running') return props.t.running
   if (status === 'passed') return props.t.passed
   if (status === 'failed') return props.t.failed
+  if (status === 'skipped') return props.t.skipped
   return props.t.waiting
 }
 </script>
@@ -94,13 +105,22 @@ function statusLabel(status: RunnerQueueItem['status']) {
         <VoltInputText :model-value="runnerIterations" type="number" @update:model-value="emit('setIterations', Number($event))" />
       </label>
 
+      <label class="runner-field">
+        <span>{{ t.failurePolicy }}</span>
+        <VoltSelect :model-value="runnerFailurePolicy" :options="failurePolicyOptions" @change="emit('setFailurePolicy', $event as RunnerFailurePolicy)" />
+      </label>
+
       <div class="runner-target-summary">
         <div><span>{{ t.activeEnvironment }}</span><strong>{{ activeEnvironment?.name ?? '-' }}</strong></div>
         <div><span>{{ t.requestCount }}</span><strong>{{ plannedCount }}</strong></div>
         <div v-if="runnerScope === 'request'"><span>{{ t.requestUrl }}</span><strong>{{ selectedRequest?.url ?? '-' }}</strong></div>
       </div>
 
-      <VoltButton class="send-btn runner-run-wide" :disabled="runnerBusy || (runnerScope === 'collection' ? !canRunCollection : !canRunRequest)" @click="runnerScope === 'collection' ? emit('runCollection') : emit('runRequest')">
+      <VoltButton v-if="runnerBusy" class="send-btn runner-run-wide runner-stop-button" @click="emit('stopRun')">
+        <Square :size="15" />
+        {{ t.stopRun }}
+      </VoltButton>
+      <VoltButton v-else class="send-btn runner-run-wide" :disabled="runnerScope === 'collection' ? !canRunCollection : !canRunRequest" @click="runnerScope === 'collection' ? emit('runCollection') : emit('runRequest')">
         <Loader2 v-if="runnerBusy" class="spin" :size="15" />
         <Play v-else :size="15" />
         {{ runnerScope === 'collection' ? t.startRunCollection : t.startRunRequest }}
@@ -112,6 +132,10 @@ function statusLabel(status: RunnerQueueItem['status']) {
         <div><strong>{{ runnerResult?.passed ?? 0 }}</strong><span>{{ t.passed }}</span></div>
         <div><strong>{{ runnerResult?.failed ?? 0 }}</strong><span>{{ t.failed }}</span></div>
         <div><strong>{{ runnerResult ? `${runnerResult.durationMs} ms` : '-' }}</strong><span>{{ t.duration }}</span></div>
+      </div>
+      <div class="runner-actions">
+        <VoltButton variant="secondary" :disabled="!hasReport" @click="emit('copyReport')"><Clipboard :size="14" /> {{ t.copyReport }}</VoltButton>
+        <VoltButton variant="secondary" :disabled="!hasReport" @click="emit('exportReport')"><Download :size="14" /> {{ t.exportReport }}</VoltButton>
       </div>
       <div class="response-panel standalone runner-result-panel">
         <div v-if="displayQueue.length" class="runner-queue-row runner-queue-header">
@@ -127,6 +151,7 @@ function statusLabel(status: RunnerQueueItem['status']) {
           <CheckCircle2 v-if="item.status === 'passed'" :size="15" class="text-emerald-600" />
           <XCircle v-else-if="item.status === 'failed'" :size="15" class="text-red-600" />
           <Loader2 v-else-if="item.status === 'running'" class="spin" :size="15" />
+          <OctagonMinus v-else-if="item.status === 'skipped'" :size="15" class="muted" />
           <Clock3 v-else :size="15" class="muted" />
           <span :class="['method', item.method.toLowerCase()]">{{ item.method }}</span>
           <div class="runner-queue-main">

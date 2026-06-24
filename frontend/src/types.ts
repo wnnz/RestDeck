@@ -2,7 +2,7 @@ export type NavKey = 'collections' | 'environments' | 'history' | 'runner' | 're
 export type RequestTab = 'params' | 'auth' | 'headers' | 'body' | 'pre' | 'tests' | 'settings'
 export type ResponseTab = 'body' | 'headers' | 'cookies' | 'tests'
 export type ResponseView = 'pretty' | 'raw' | 'preview'
-export type ActiveModal = 'postman' | 'fetch' | 'curl' | 'export' | null
+export type ActiveModal = 'postman' | 'fetch' | 'curl' | 'openapi' | 'export' | null
 export type Language = 'zh-CN' | 'en-US'
 export type Theme = 'light' | 'dark'
 export type ProxyMode = 'inherit' | 'none' | 'custom'
@@ -12,7 +12,9 @@ export type ResponseStrategy = 'latestHistory' | 'alwaysRequest' | 'refreshAfter
 export type VariableSuggestion = { name: string; detail: string }
 export type JsonTokenType = 'plain' | 'key' | 'string' | 'number' | 'boolean' | 'null' | 'punctuation'
 export type JsonToken = { type: JsonTokenType; text: string }
-export type RunnerItemStatus = 'waiting' | 'running' | 'passed' | 'failed'
+export type JsonPathOption = { path: string; label: string; preview: string }
+export type RunnerItemStatus = 'waiting' | 'running' | 'passed' | 'failed' | 'skipped'
+export type RunnerFailurePolicy = 'continue' | 'stopOnFailure'
 export type RunnerQueueItem = {
   id: string
   requestId: string

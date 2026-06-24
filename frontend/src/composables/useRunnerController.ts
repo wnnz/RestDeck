@@ -1,14 +1,16 @@
 import { ref, type ComputedRef, type Ref } from 'vue'
 import { domain } from '../../wailsjs/go/models'
-import type { RunnerQueueItem } from '../types'
+import type { RunnerFailurePolicy, RunnerQueueItem } from '../types'
 import { formatError } from '../utils/format'
 import { cloneRequest, normalizeRequest, syncFormBody } from '../utils/requestModel'
-import { buildRunnerQueue, newRunnerResult, patchRunnerQueueItem, summarizeRunnerResponse } from '../utils/runnerModel'
+import { buildRunnerQueue, markPendingRunnerItems, newRunnerResult, patchRunnerQueueItem, summarizeRunnerResponse } from '../utils/runnerModel'
 
 type RunnerLabels = {
   runner: string
   passed: string
   failed: string
+  skipped: string
+  stopped: string
   running: string
   sendingRequest: string
   tests: string
@@ -33,6 +35,8 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
   const runnerIterations = ref(1)
   const runnerRequestId = ref('')
   const runnerQueue = ref<RunnerQueueItem[]>([])
+  const runnerFailurePolicy = ref<RunnerFailurePolicy>('continue')
+  const runnerStopRequested = ref(false)
 
   function ensureRunnerRequest(activeRequestId: string) {
     const collection = options.activeCollection.value
@@ -60,9 +64,21 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
     resetRunnerOutput()
   }
 
+  function setRunnerFailurePolicy(policy: RunnerFailurePolicy) {
+    runnerFailurePolicy.value = policy === 'stopOnFailure' ? 'stopOnFailure' : 'continue'
+    resetRunnerOutput()
+  }
+
+  function stopRunner() {
+    if (!runnerBusy.value) return
+    runnerStopRequested.value = true
+    options.statusMessage.value = options.labels.value.stopped
+  }
+
   function resetRunnerOutput() {
     runnerQueue.value = []
     runnerResult.value = null
+    runnerStopRequested.value = false
   }
 
   async function runActiveCollection() {
@@ -72,6 +88,7 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
     const requests = collection.requests ?? []
     const startedAt = Date.now()
     runnerBusy.value = true
+    runnerStopRequested.value = false
     try {
       runnerQueue.value = buildRunnerQueue(requests, iterations)
       runnerResult.value = newRunnerResult({
@@ -82,8 +99,18 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
       })
       for (let iteration = 1; iteration <= iterations; iteration++) {
         for (const request of requests) {
-          await runRunnerQueueRequest(request, iteration)
+          if (runnerStopRequested.value) {
+            skipPendingRunnerItems(options.labels.value.stopped)
+            break
+          }
+          const passed = await runRunnerQueueRequest(request, iteration)
+          if (!passed && runnerFailurePolicy.value === 'stopOnFailure') {
+            skipPendingRunnerItems(options.labels.value.failed)
+            runnerStopRequested.value = true
+            break
+          }
         }
+        if (runnerStopRequested.value) break
       }
       runnerResult.value.durationMs = Date.now() - startedAt
       options.statusMessage.value = runnerStatusMessage()
@@ -99,6 +126,7 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
     if (!request) return
     const startedAt = Date.now()
     runnerBusy.value = true
+    runnerStopRequested.value = false
     try {
       runnerQueue.value = buildRunnerQueue([request], 1)
       runnerResult.value = newRunnerResult({
@@ -151,7 +179,16 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
         message
       })
       addRunnerResultItem(requestToSend, false, message)
+      return false
     }
+    return runnerQueue.value.find((item) => item.id === queueId)?.status === 'passed'
+  }
+
+  function skipPendingRunnerItems(message: string) {
+    runnerQueue.value = markPendingRunnerItems(runnerQueue.value, {
+      status: 'skipped',
+      message
+    })
   }
 
   function addRunnerResultItem(request: domain.Request, passed: boolean, message: string) {
@@ -172,6 +209,28 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
     return `${options.labels.value.runner}: ${runnerResult.value?.passed ?? 0} ${options.labels.value.passed}, ${runnerResult.value?.failed ?? 0} ${options.labels.value.failed}`
   }
 
+  function runnerReportText() {
+    const result = runnerResult.value
+    const lines = [
+      `# ${options.labels.value.runner}`,
+      '',
+      `${options.labels.value.passed}: ${result?.passed ?? 0}`,
+      `${options.labels.value.failed}: ${result?.failed ?? 0}`,
+      `Duration: ${result?.durationMs ?? 0} ms`,
+      '',
+      '| # | Iteration | Method | Request | URL | Status | Code | Duration | Message |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- | --- |'
+    ]
+    runnerQueue.value.forEach((item, index) => {
+      lines.push(`| ${index + 1} | ${item.iteration} | ${item.method} | ${escapeCell(item.name)} | ${escapeCell(item.url)} | ${item.status} | ${item.statusCode ?? '-'} | ${item.durationMs != null ? `${item.durationMs} ms` : '-'} | ${escapeCell(item.message || '-')} |`)
+    })
+    return lines.join('\n')
+  }
+
+  function escapeCell(value: string) {
+    return String(value).replaceAll('|', '\\|').replace(/\r?\n/g, ' ')
+  }
+
   return {
     runnerBusy,
     runnerResult,
@@ -179,13 +238,18 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
     runnerIterations,
     runnerRequestId,
     runnerQueue,
+    runnerFailurePolicy,
+    runnerStopRequested,
     ensureRunnerRequest,
     setRunnerRequest,
     selectRunnerRequest,
     setRunnerScope,
     setRunnerIterations,
+    setRunnerFailurePolicy,
+    stopRunner,
     resetRunnerOutput,
     runActiveCollection,
-    runRunnerRequest
+    runRunnerRequest,
+    runnerReportText
   }
 }

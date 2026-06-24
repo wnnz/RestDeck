@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -102,6 +104,20 @@ func (a *App) DeleteRequest(id string) (domain.WorkspaceState, error) {
 	return a.GetState()
 }
 
+func (a *App) SaveTextFile(title, defaultFilename, content string) (string, error) {
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           fallback(title, "保存文件"),
+		DefaultFilename: fallback(defaultFilename, "restdeck.txt"),
+	})
+	if err != nil || path == "" {
+		return path, err
+	}
+	if filepath.Ext(path) == "" && filepath.Ext(defaultFilename) != "" {
+		path += filepath.Ext(defaultFilename)
+	}
+	return path, os.WriteFile(path, []byte(content), 0o644)
+}
+
 func (a *App) DeleteCollection(collectionID string) (domain.WorkspaceState, error) {
 	if err := a.store.DeleteCollection(a.ctx, collectionID); err != nil {
 		return domain.WorkspaceState{}, err
@@ -159,6 +175,20 @@ func (a *App) SaveSettings(settings domain.Settings) (domain.WorkspaceState, err
 	return a.GetState()
 }
 
+func (a *App) DeleteCookie(cookie domain.Cookie) (domain.WorkspaceState, error) {
+	if err := a.store.DeleteCookie(a.ctx, cookie); err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	return a.GetState()
+}
+
+func (a *App) ClearCookies() (domain.WorkspaceState, error) {
+	if err := a.store.ClearCookies(a.ctx); err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	return a.GetState()
+}
+
 func (a *App) SendRequest(r domain.Request, environmentID string, globals []domain.KeyValue) (domain.Response, error) {
 	state, err := a.store.State(a.ctx)
 	if err != nil {
@@ -167,6 +197,7 @@ func (a *App) SendRequest(r domain.Request, environmentID string, globals []doma
 	env := findEnvironment(state.Environments, environmentID)
 	r = a.prepareSecrets(r, false)
 	env = a.prepareEnvironmentSecrets(env, false)
+	a.sender.LoadCookies(state.Cookies)
 	resolver := a.newResolver(env, globals, state.Settings.DefaultProxy)
 	variables, err := resolver.ValuesWithError()
 	if err != nil {
@@ -174,6 +205,12 @@ func (a *App) SendRequest(r domain.Request, environmentID string, globals []doma
 	}
 	preResults := a.scripts.RunPreRequest(a.ctx, r.PreScript, r, variables)
 	response, sendErr := a.sender.SendWithVariablesAndProxy(a.ctx, r, variables, state.Settings.DefaultProxy)
+	if len(response.Cookies) > 0 {
+		_ = a.store.SaveCookies(a.ctx, response.Cookies)
+	}
+	if historyCookies := a.sender.CookiesForURL(response.RequestedURL); len(historyCookies) > 0 {
+		_ = a.store.SaveCookies(a.ctx, historyCookies)
+	}
 	tests := a.scripts.RunTests(a.ctx, r.TestScript, r, response, variables)
 	if len(preResults) > 0 {
 		tests = append(preResults, tests...)
@@ -212,6 +249,22 @@ func (a *App) ImportPostmanCollection(raw string) (domain.WorkspaceState, error)
 		if err := a.store.SaveFolder(a.ctx, folder); err != nil {
 			return domain.WorkspaceState{}, err
 		}
+	}
+	for _, request := range collection.Requests {
+		if err := a.store.SaveRequest(a.ctx, request); err != nil {
+			return domain.WorkspaceState{}, err
+		}
+	}
+	return a.GetState()
+}
+
+func (a *App) ImportOpenAPICollection(raw string) (domain.WorkspaceState, error) {
+	collection, err := reqsvc.ImportOpenAPI(raw)
+	if err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	if err := a.store.SaveCollection(a.ctx, collection); err != nil {
+		return domain.WorkspaceState{}, err
 	}
 	for _, request := range collection.Requests {
 		if err := a.store.SaveRequest(a.ctx, request); err != nil {
@@ -261,6 +314,19 @@ func (a *App) ExportPostmanCollection(collectionID string) (string, error) {
 	for _, c := range state.Collections {
 		if c.ID == collectionID {
 			return reqsvc.ExportPostman(c)
+		}
+	}
+	return "", fmt.Errorf("collection %s not found", collectionID)
+}
+
+func (a *App) ExportOpenAPICollection(collectionID string) (string, error) {
+	state, err := a.store.State(a.ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, c := range state.Collections {
+		if c.ID == collectionID {
+			return reqsvc.ExportOpenAPI(c)
 		}
 	}
 	return "", fmt.Errorf("collection %s not found", collectionID)
@@ -318,6 +384,44 @@ func (a *App) TestSSE(input realtime.SSERequest, environmentID string, globals [
 
 func (a *App) FormatBody(contentType, body string) string {
 	return reqsvc.FormatBody(contentType, body)
+}
+
+func (a *App) QueryJSONPath(body, path string) (string, error) {
+	value, ok, err := reqsvc.ExtractJSONPath(body, path)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("JSONPath %s 未找到", path)
+	}
+	return value, nil
+}
+
+func (a *App) CreateResponseVariable(environmentID, key, requestID, jsonPath, fallbackValue string) (domain.WorkspaceState, error) {
+	state, err := a.store.State(a.ctx)
+	if err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	env := findEnvironment(state.Environments, environmentID)
+	if env.ID == "" {
+		return domain.WorkspaceState{}, fmt.Errorf("environment %s not found", environmentID)
+	}
+	env = a.prepareEnvironmentSecrets(env, false)
+	env.Variables = append(env.Variables, domain.KeyValue{
+		ID:               uuid.NewString(),
+		Enabled:          true,
+		Key:              fallback(strings.TrimSpace(key), "responseValue"),
+		ValueType:        "responseJsonPath",
+		SourceRequestID:  requestID,
+		JSONPath:         fallback(strings.TrimSpace(jsonPath), "$."),
+		ResponseStrategy: "latestHistory",
+		FallbackValue:    fallbackValue,
+	})
+	env = a.prepareEnvironmentSecrets(env, true)
+	if err := a.store.SaveEnvironment(a.ctx, env); err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	return a.GetState()
 }
 
 func (a *App) ensureImportCollection(collectionID string) (domain.Collection, error) {
