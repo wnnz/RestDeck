@@ -40,7 +40,7 @@ func ResolveProxyForURL(requestProxy, defaultProxy domain.ProxyConfig, rawURL st
 		return domain.ProxyConfig{Mode: "none"}, source, true, nil
 	}
 	if effective.URL == "" {
-		return domain.ProxyConfig{}, source, false, fmt.Errorf("代理地址不能为空")
+		return domain.ProxyConfig{Mode: "none"}, source, false, nil
 	}
 	parsed, err := url.Parse(effective.URL)
 	if err != nil {

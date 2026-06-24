@@ -108,8 +108,7 @@ export namespace domain {
 	    testScript: string;
 	    timeoutMs: number;
 	    sortOrder: number;
-	    // Go type: time
-	    updatedAt: any;
+	    updatedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Request(source);
@@ -134,7 +133,7 @@ export namespace domain {
 	        this.testScript = source["testScript"];
 	        this.timeoutMs = source["timeoutMs"];
 	        this.sortOrder = source["sortOrder"];
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.updatedAt = source["updatedAt"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -161,8 +160,7 @@ export namespace domain {
 	    parentId: string;
 	    name: string;
 	    sortOrder: number;
-	    // Go type: time
-	    updatedAt: any;
+	    updatedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Folder(source);
@@ -175,26 +173,8 @@ export namespace domain {
 	        this.parentId = source["parentId"];
 	        this.name = source["name"];
 	        this.sortOrder = source["sortOrder"];
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.updatedAt = source["updatedAt"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class Collection {
 	    id: string;
@@ -202,10 +182,8 @@ export namespace domain {
 	    description: string;
 	    folders: Folder[];
 	    requests: Request[];
-	    // Go type: time
-	    createdAt: any;
-	    // Go type: time
-	    updatedAt: any;
+	    createdAt: string;
+	    updatedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Collection(source);
@@ -218,8 +196,8 @@ export namespace domain {
 	        this.description = source["description"];
 	        this.folders = this.convertValues(source["folders"], Folder);
 	        this.requests = this.convertValues(source["requests"], Request);
-	        this.createdAt = this.convertValues(source["createdAt"], null);
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -245,8 +223,7 @@ export namespace domain {
 	    value: string;
 	    domain: string;
 	    path: string;
-	    // Go type: time
-	    expires: any;
+	    expires: string;
 	    httpOnly: boolean;
 	    secure: boolean;
 	
@@ -260,36 +237,17 @@ export namespace domain {
 	        this.value = source["value"];
 	        this.domain = source["domain"];
 	        this.path = source["path"];
-	        this.expires = this.convertValues(source["expires"], null);
+	        this.expires = source["expires"];
 	        this.httpOnly = source["httpOnly"];
 	        this.secure = source["secure"];
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class Environment {
 	    id: string;
 	    name: string;
 	    variables: KeyValue[];
 	    isActive: boolean;
-	    // Go type: time
-	    updatedAt: any;
+	    updatedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Environment(source);
@@ -301,7 +259,7 @@ export namespace domain {
 	        this.name = source["name"];
 	        this.variables = this.convertValues(source["variables"], KeyValue);
 	        this.isActive = source["isActive"];
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.updatedAt = source["updatedAt"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -490,8 +448,7 @@ export namespace domain {
 	    url: string;
 	    statusCode: number;
 	    durationMs: number;
-	    // Go type: time
-	    createdAt: any;
+	    createdAt: string;
 	    request: Request;
 	    response: Response;
 	
@@ -508,7 +465,7 @@ export namespace domain {
 	        this.url = source["url"];
 	        this.statusCode = source["statusCode"];
 	        this.durationMs = source["durationMs"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.createdAt = source["createdAt"];
 	        this.request = this.convertValues(source["request"], Request);
 	        this.response = this.convertValues(source["response"], Response);
 	    }
@@ -579,10 +536,8 @@ export namespace domain {
 	    request: PreparedRequest;
 	    response: Response;
 	    testResults: TestResult[];
-	    // Go type: time
-	    startedAt: any;
-	    // Go type: time
-	    finishedAt: any;
+	    startedAt: string;
+	    finishedAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new RunnerRequestResult(source);
@@ -603,8 +558,8 @@ export namespace domain {
 	        this.request = this.convertValues(source["request"], PreparedRequest);
 	        this.response = this.convertValues(source["response"], Response);
 	        this.testResults = this.convertValues(source["testResults"], TestResult);
-	        this.startedAt = this.convertValues(source["startedAt"], null);
-	        this.finishedAt = this.convertValues(source["finishedAt"], null);
+	        this.startedAt = source["startedAt"];
+	        this.finishedAt = source["finishedAt"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -636,8 +591,7 @@ export namespace domain {
 	    durationMs: number;
 	    items: TestResult[];
 	    details: RunnerRequestResult[];
-	    // Go type: time
-	    createdAt: any;
+	    createdAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new RunnerResult(source);
@@ -655,7 +609,7 @@ export namespace domain {
 	        this.durationMs = source["durationMs"];
 	        this.items = this.convertValues(source["items"], TestResult);
 	        this.details = this.convertValues(source["details"], RunnerRequestResult);
-	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.createdAt = source["createdAt"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

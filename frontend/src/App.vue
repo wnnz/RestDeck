@@ -403,6 +403,10 @@ watch(activeRequestTab, (tab) => {
   if (tab === 'variables') void refreshVariableDebug()
 })
 
+watch(responseJSONPath, () => {
+  responseJSONPathResult.value = ''
+})
+
 watch(envDraft, () => {
   if (environmentPanel.value === 'environment') scheduleEnvironmentAutosave()
 }, { deep: true })

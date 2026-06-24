@@ -79,7 +79,7 @@ type Request struct {
 	TestScript   string      `json:"testScript"`
 	TimeoutMs    int         `json:"timeoutMs"`
 	SortOrder    int         `json:"sortOrder"`
-	UpdatedAt    time.Time   `json:"updatedAt"`
+	UpdatedAt    time.Time   `json:"updatedAt" ts_type:"string"`
 }
 
 type Folder struct {
@@ -88,7 +88,7 @@ type Folder struct {
 	ParentID     string    `json:"parentId"`
 	Name         string    `json:"name"`
 	SortOrder    int       `json:"sortOrder"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	UpdatedAt    time.Time `json:"updatedAt" ts_type:"string"`
 }
 
 type Collection struct {
@@ -97,8 +97,8 @@ type Collection struct {
 	Description string    `json:"description"`
 	Folders     []Folder  `json:"folders"`
 	Requests    []Request `json:"requests"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	CreatedAt   time.Time `json:"createdAt" ts_type:"string"`
+	UpdatedAt   time.Time `json:"updatedAt" ts_type:"string"`
 }
 
 type Environment struct {
@@ -106,7 +106,7 @@ type Environment struct {
 	Name      string     `json:"name"`
 	Variables []KeyValue `json:"variables"`
 	IsActive  bool       `json:"isActive"`
-	UpdatedAt time.Time  `json:"updatedAt"`
+	UpdatedAt time.Time  `json:"updatedAt" ts_type:"string"`
 }
 
 type Cookie struct {
@@ -114,7 +114,7 @@ type Cookie struct {
 	Value    string    `json:"value"`
 	Domain   string    `json:"domain"`
 	Path     string    `json:"path"`
-	Expires  time.Time `json:"expires"`
+	Expires  time.Time `json:"expires" ts_type:"string"`
 	HTTPOnly bool      `json:"httpOnly"`
 	Secure   bool      `json:"secure"`
 }
@@ -171,7 +171,7 @@ type HistoryItem struct {
 	URL        string    `json:"url"`
 	StatusCode int       `json:"statusCode"`
 	DurationMs int64     `json:"durationMs"`
-	CreatedAt  time.Time `json:"createdAt"`
+	CreatedAt  time.Time `json:"createdAt" ts_type:"string"`
 	Request    Request   `json:"request"`
 	Response   Response  `json:"response"`
 }
@@ -187,7 +187,7 @@ type RunnerResult struct {
 	DurationMs    int64                 `json:"durationMs"`
 	Items         []TestResult          `json:"items"`
 	Details       []RunnerRequestResult `json:"details"`
-	CreatedAt     time.Time             `json:"createdAt"`
+	CreatedAt     time.Time             `json:"createdAt" ts_type:"string"`
 }
 
 type RunnerRequestResult struct {
@@ -204,8 +204,8 @@ type RunnerRequestResult struct {
 	Request     PreparedRequest `json:"request"`
 	Response    Response        `json:"response"`
 	TestResults []TestResult    `json:"testResults"`
-	StartedAt   time.Time       `json:"startedAt"`
-	FinishedAt  time.Time       `json:"finishedAt"`
+	StartedAt   time.Time       `json:"startedAt" ts_type:"string"`
+	FinishedAt  time.Time       `json:"finishedAt" ts_type:"string"`
 }
 
 type VariableDebugItem struct {

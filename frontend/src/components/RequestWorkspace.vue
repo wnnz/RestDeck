@@ -12,6 +12,7 @@ import VoltTabsBar from './volt/VoltTabsBar.vue'
 import type { Translation } from '../i18n/messages'
 import type { JsonPathOption, JsonToken, RequestTab, ResponseTab, ResponseView, VariableSuggestion } from '../types'
 import { formatBytes, responseStatusText, statusClass } from '../utils/format'
+import { tokenizeJSON } from '../utils/jsonHighlight'
 
 const props = defineProps<{
   t: Translation
@@ -45,6 +46,8 @@ const responseJSONPath = defineModel<string>('responseJSONPath', { required: tru
 const responseVariableKey = defineModel<string>('responseVariableKey', { required: true })
 const splitEditorRef = ref<HTMLElement | null>(null)
 const requestTitleInput = ref<InstanceType<typeof VoltInputText> | null>(null)
+const responseVariableKeyInput = ref<InstanceType<typeof VoltInputText> | null>(null)
+const jsonPathOptionsRef = ref<HTMLElement | null>(null)
 
 const emit = defineEmits<{
   'create-request': []
@@ -65,6 +68,9 @@ const emit = defineEmits<{
 
 const formEditorMode = ref<'table' | 'text'>('table')
 const responseHeightPercent = ref(Number(localStorage.getItem('restdeck.responseHeightPercent')) || 56)
+const jsonPathSuggestionsOpen = ref(false)
+const jsonPathSuggestionIndex = ref(0)
+const responseVariableEditorOpen = ref(false)
 const methodOptions = computed(() => props.methods.map((method) => ({ value: method, label: method })))
 const addToOptions = computed(() => [{ value: 'header', label: props.t.headers }, { value: 'query', label: props.t.params }])
 const formTypeOptions = computed(() => [{ value: 'text', label: props.t.text }, { value: 'file', label: props.t.file }])
@@ -74,8 +80,39 @@ const proxyModeOptions = computed(() => [
   { value: 'custom', label: props.t.proxyCustom }
 ])
 const editingRequestTitle = ref(false)
+const responseInspectorText = computed({
+  get: () => responseSearch.value,
+  set: (value: string | number) => {
+    const next = String(value ?? '')
+    responseSearch.value = next
+    responseJSONPath.value = isSupportedResponseJSONPath(next) ? next.trim() : ''
+    jsonPathSuggestionsOpen.value = isJSONPathSuggestionInput(next)
+    jsonPathSuggestionIndex.value = 0
+  }
+})
+const responseInspectorQuery = computed(() => responseInspectorText.value.trim())
+const responseSearchTerm = computed(() => isResponseJSONPathInput.value ? '' : responseInspectorQuery.value)
+const isResponseJSONPathInput = computed(() => isSupportedResponseJSONPath(responseInspectorQuery.value))
+const showJSONPathSuggestions = computed(() => jsonPathSuggestionsOpen.value && isJSONPathSuggestionInput(responseInspectorQuery.value))
+const showJSONPathResultInContent = computed(() => isResponseJSONPathInput.value && props.responseJSONPathResult !== '')
+const jsonPathResultBody = computed(() => {
+  const raw = props.responseJSONPathResult
+  if (!showJSONPathResultInContent.value || responseView.value !== 'pretty') return raw
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
+})
+const highlightedJSONPathResult = computed<JsonToken[]>(() => {
+  if (responseView.value !== 'pretty') {
+    return [{ type: 'plain', text: jsonPathResultBody.value }]
+  }
+  return tokenizeJSON(jsonPathResultBody.value)
+})
+const copyableResponseBody = computed(() => showJSONPathResultInContent.value ? jsonPathResultBody.value : props.prettyResponseBody)
 const searchedResponseSegments = computed(() => {
-  const query = responseSearch.value.trim()
+  const query = responseSearchTerm.value
   const source = props.prettyResponseBody
   if (!query) return [{ text: source, match: false }]
   const lowerSource = source.toLowerCase()
@@ -93,7 +130,23 @@ const searchedResponseSegments = computed(() => {
   return segments.length ? segments : [{ text: source, match: false }]
 })
 
-const visibleJSONPathOptions = computed(() => props.responseJSONPathOptions.slice(0, 12))
+const visibleJSONPathOptions = computed(() => {
+  if (!showJSONPathSuggestions.value) return []
+  const query = responseInspectorQuery.value.toLowerCase()
+  const options = props.responseJSONPathOptions
+  if (query === '$' || query === '$.' || query === '$[') {
+    return options.slice(0, 10)
+  }
+  const startsWith = options.filter((option) => option.path.toLowerCase().startsWith(query))
+  const matched = startsWith.length ? startsWith : options.filter((option) => option.path.toLowerCase().includes(query))
+  return matched.slice(0, 10)
+})
+const activeJSONPathSuggestionIndex = computed(() => {
+  const length = visibleJSONPathOptions.value.length
+  if (!length) return -1
+  return Math.min(Math.max(jsonPathSuggestionIndex.value, 0), length - 1)
+})
+const activeResponseSearchMatches = computed(() => responseSearchTerm.value ? props.responseSearchMatches : 0)
 const requestTitleInputStyle = computed(() => {
   const text = activeRequest.value?.name || props.t.requestName
   const units = Array.from(text).reduce((total, char) => total + (char.charCodeAt(0) > 255 ? 2 : 1), 0)
@@ -106,6 +159,7 @@ const splitEditorStyle = computed(() => ({
 
 let responseResizeStartY = 0
 let responseResizeStartPercent = 56
+let jsonPathSuggestionCloseTimer: ReturnType<typeof setTimeout> | null = null
 
 function startResponseResize(event: PointerEvent) {
   const container = splitEditorRef.value
@@ -137,6 +191,7 @@ function stopResponseResize() {
 onBeforeUnmount(() => {
   window.removeEventListener('pointermove', resizeResponsePanel)
   window.removeEventListener('pointerup', stopResponseResize)
+  if (jsonPathSuggestionCloseTimer) clearTimeout(jsonPathSuggestionCloseTimer)
   document.body.classList.remove('resizing-response-panel')
 })
 
@@ -184,8 +239,140 @@ watch(() => activeRequest.value?.body, (body) => {
   request.formItems = formItemsFromBody(body ?? '')
 })
 
+watch(isResponseJSONPathInput, (valid) => {
+  if (valid) return
+  responseVariableEditorOpen.value = false
+  responseVariableKey.value = ''
+})
+
+watch(visibleJSONPathOptions, (options) => {
+  if (!options.length) {
+    jsonPathSuggestionIndex.value = 0
+    return
+  }
+  if (jsonPathSuggestionIndex.value >= options.length) {
+    jsonPathSuggestionIndex.value = options.length - 1
+  }
+})
+
 function sendRequest() {
   void props.sendRequestAction()
+}
+
+function handleResponseInspectorKeydown(event: KeyboardEvent) {
+  if (event.key === 'ArrowDown') {
+    if (moveJSONPathSuggestion(1)) event.preventDefault()
+    return
+  }
+  if (event.key === 'ArrowUp') {
+    if (moveJSONPathSuggestion(-1)) event.preventDefault()
+    return
+  }
+  if (event.key === 'Escape') {
+    jsonPathSuggestionsOpen.value = false
+    return
+  }
+  if (event.key !== 'Enter') return
+  if (jsonPathSuggestionsOpen.value && activeJSONPathSuggestionIndex.value >= 0) {
+    event.preventDefault()
+    selectJSONPathOption(visibleJSONPathOptions.value[activeJSONPathSuggestionIndex.value], true)
+    return
+  }
+  if (!isResponseJSONPathInput.value) return
+  event.preventDefault()
+  queryCurrentJSONPath()
+}
+
+function moveJSONPathSuggestion(delta: number) {
+  if (!isJSONPathSuggestionInput(responseInspectorQuery.value)) return false
+  jsonPathSuggestionsOpen.value = true
+  const count = visibleJSONPathOptions.value.length
+  if (!count) return false
+  const current = activeJSONPathSuggestionIndex.value >= 0 ? activeJSONPathSuggestionIndex.value : 0
+  jsonPathSuggestionIndex.value = (current + delta + count) % count
+  void nextTick(scrollActiveJSONPathSuggestionIntoView)
+  return true
+}
+
+function scrollActiveJSONPathSuggestionIntoView() {
+  const active = jsonPathOptionsRef.value?.querySelector('button.active')
+  if (active instanceof HTMLElement) {
+    active.scrollIntoView({ block: 'nearest' })
+  }
+}
+
+function selectJSONPathOption(option: JsonPathOption, query = false) {
+  responseInspectorText.value = option.path
+  jsonPathSuggestionsOpen.value = false
+  if (query) queryCurrentJSONPath()
+}
+
+function queryCurrentJSONPath() {
+  jsonPathSuggestionsOpen.value = false
+  emit('query-json-path')
+}
+
+function openJSONPathSuggestions() {
+  if (jsonPathSuggestionCloseTimer) clearTimeout(jsonPathSuggestionCloseTimer)
+  jsonPathSuggestionsOpen.value = isJSONPathSuggestionInput(responseInspectorQuery.value)
+}
+
+function closeJSONPathSuggestionsSoon() {
+  if (jsonPathSuggestionCloseTimer) clearTimeout(jsonPathSuggestionCloseTimer)
+  jsonPathSuggestionCloseTimer = setTimeout(() => {
+    jsonPathSuggestionsOpen.value = false
+  }, 120)
+}
+
+function openResponseVariableEditor() {
+  if (!isResponseJSONPathInput.value) return
+  responseVariableEditorOpen.value = !responseVariableEditorOpen.value
+  void nextTick(() => {
+    responseVariableKeyInput.value?.focus()
+  })
+}
+
+function confirmResponseVariable() {
+  if (!isResponseJSONPathInput.value) return
+  emit('create-response-variable')
+  responseVariableEditorOpen.value = false
+}
+
+function isJSONPathSuggestionInput(value: string) {
+  const input = value.trim()
+  return input === '$' || input.startsWith('$.') || input.startsWith('$[')
+}
+
+function isSupportedResponseJSONPath(value: string) {
+  const input = value.trim()
+  if (input === '$') return true
+  if (!input.startsWith('$.') && !input.startsWith('$[')) return false
+  return parseSupportedJSONPath(input)
+}
+
+function parseSupportedJSONPath(path: string) {
+  let rest = path.slice(1)
+  while (rest) {
+    if (rest.startsWith('.')) {
+      rest = rest.slice(1)
+      const match = rest.match(/^[^.[\]]+/)
+      if (!match) return false
+      rest = rest.slice(match[0].length)
+      continue
+    }
+    if (rest.startsWith('[')) {
+      const end = rest.indexOf(']')
+      if (end < 0) return false
+      const token = rest.slice(1, end).trim()
+      if (!/^\d+$/.test(token) && !/^"([^"\\]|\\.)*"$/.test(token) && !/^'([^'\\]|\\.)*'$/.test(token)) {
+        return false
+      }
+      rest = rest.slice(end + 1)
+      continue
+    }
+    return false
+  }
+  return true
 }
 
 function formatRequestJSON() {
@@ -282,7 +469,6 @@ function newFormItem() {
           v-else
           class="title-display"
           type="button"
-          :style="requestTitleInputStyle"
           @click="editRequestTitle"
         >
           {{ activeRequest.name || t.requestName }}
@@ -493,45 +679,65 @@ function newFormItem() {
           <span v-if="response">{{ formatBytes(response.sizeBytes) }}</span>
         </div>
         <VoltTabsBar v-model="activeResponseTab" :items="responseTabs" />
-        <div class="response-panel">
+        <div class="response-panel" :class="{ 'with-body-tools': activeResponseTab === 'body' && response }">
           <template v-if="!response">
             <div class="empty-panel">{{ t.noResponse }}</div>
           </template>
           <template v-else-if="activeResponseTab === 'body'">
             <div class="response-tools">
-              <div class="view-switch">
-                <VoltButton :class="{ active: responseView === 'pretty' }" @click="responseView = 'pretty'">{{ t.pretty }}</VoltButton>
-                <VoltButton :class="{ active: responseView === 'raw' }" @click="responseView = 'raw'">{{ t.raw }}</VoltButton>
-                <VoltButton :class="{ active: responseView === 'preview' }" @click="responseView = 'preview'">{{ t.preview }}</VoltButton>
-                <span class="pill">JSON</span>
-              </div>
-              <div class="response-tool-line">
+              <div class="response-toolbar">
+                <div class="view-switch">
+                  <VoltButton :class="{ active: responseView === 'pretty' }" @click="responseView = 'pretty'">{{ t.pretty }}</VoltButton>
+                  <VoltButton :class="{ active: responseView === 'raw' }" @click="responseView = 'raw'">{{ t.raw }}</VoltButton>
+                  <VoltButton :class="{ active: responseView === 'preview' }" @click="responseView = 'preview'">{{ t.preview }}</VoltButton>
+                  <span class="pill">JSON</span>
+                </div>
                 <div class="response-search-box">
                   <Search :size="13" />
-                  <VoltInputText v-model="responseSearch" :placeholder="t.responseSearch" />
-                  <span>{{ responseSearchMatches }}</span>
+                  <VoltInputText
+                    v-model="responseInspectorText"
+                    :placeholder="t.responseInspectorPlaceholder"
+                    @focus="openJSONPathSuggestions"
+                    @blur="closeJSONPathSuggestionsSoon"
+                    @keydown="handleResponseInspectorKeydown"
+                  />
+                  <span>{{ activeResponseSearchMatches }}</span>
+                  <div v-if="visibleJSONPathOptions.length" ref="jsonPathOptionsRef" class="jsonpath-options">
+                    <button
+                      v-for="(option, index) in visibleJSONPathOptions"
+                      :key="option.path"
+                      type="button"
+                      :class="{ active: index === activeJSONPathSuggestionIndex }"
+                      @mousedown.prevent="selectJSONPathOption(option, true)"
+                    >
+                      <code>{{ option.path }}</code>
+                      <span>{{ option.preview }}</span>
+                    </button>
+                  </div>
+                </div>
+                <VoltButton variant="secondary" @click="emit('copy-response-value', copyableResponseBody)"><Clipboard :size="14" /> {{ t.copyResult }}</VoltButton>
+                <div class="response-variable-creator">
+                  <VoltButton variant="secondary" :disabled="!isResponseJSONPathInput" @click="openResponseVariableEditor"><Variable :size="14" /> {{ t.createVariableFromResponse }}</VoltButton>
+                  <div v-if="responseVariableEditorOpen" class="response-variable-popover">
+                    <strong>{{ t.createVariableFromResponse }}</strong>
+                    <div class="response-variable-popover-body">
+                      <VoltInputText ref="responseVariableKeyInput" v-model="responseVariableKey" class="response-variable-input" :placeholder="t.key" @keydown.enter.prevent="confirmResponseVariable" />
+                      <VoltButton class="response-variable-confirm" variant="primary" size="sm" @click="confirmResponseVariable">{{ t.confirm }}</VoltButton>
+                    </div>
+                  </div>
                 </div>
                 <VoltButton variant="secondary" @click="emit('save-response')"><Download :size="14" /> {{ t.saveResponse }}</VoltButton>
               </div>
-              <div class="response-tool-line">
-                <VoltInputText v-model="responseJSONPath" class="jsonpath-input" :placeholder="t.jsonPathQuery" />
-                <VoltButton variant="secondary" @click="emit('query-json-path')"><Search :size="14" /> {{ t.jsonPathQuery }}</VoltButton>
-                <VoltButton variant="secondary" :disabled="!responseJSONPathResult" @click="emit('copy-response-value', responseJSONPathResult)"><Clipboard :size="14" /> {{ t.copyValue }}</VoltButton>
-                <VoltInputText v-model="responseVariableKey" class="response-variable-input" :placeholder="t.key" />
-                <VoltButton variant="secondary" :disabled="!responseJSONPath.trim()" @click="emit('create-response-variable')"><Variable :size="14" /> {{ t.createVariableFromResponse }}</VoltButton>
-              </div>
-              <div v-if="visibleJSONPathOptions.length" class="jsonpath-options">
-                <button v-for="option in visibleJSONPathOptions" :key="option.path" type="button" @click="responseJSONPath = option.path">
-                  <code>{{ option.path }}</code>
-                  <span>{{ option.preview }}</span>
-                </button>
-              </div>
-              <code v-if="responseJSONPathResult" class="jsonpath-result">{{ responseJSONPathResult }}</code>
             </div>
-            <iframe v-if="responseView === 'preview'" :srcdoc="response.body" />
-            <pre v-else-if="responseSearch.trim()" class="json-highlight"><span v-for="(segment, index) in searchedResponseSegments" :key="index" :class="{ 'search-match': segment.match }">{{ segment.text }}</span></pre>
-            <pre v-else-if="responseView === 'pretty'" class="json-highlight"><span v-for="(token, index) in highlightedResponseBody" :key="index" :class="`json-${token.type}`">{{ token.text }}</span></pre>
-            <pre v-else>{{ prettyResponseBody }}</pre>
+            <div class="response-content">
+              <iframe v-if="showJSONPathResultInContent && responseView === 'preview'" :srcdoc="jsonPathResultBody" />
+              <pre v-else-if="showJSONPathResultInContent && responseView === 'pretty'" class="json-highlight"><span v-for="(token, index) in highlightedJSONPathResult" :key="index" :class="`json-${token.type}`">{{ token.text }}</span></pre>
+              <pre v-else-if="showJSONPathResultInContent">{{ jsonPathResultBody }}</pre>
+              <iframe v-else-if="responseView === 'preview'" :srcdoc="response.body" />
+              <pre v-else-if="responseSearchTerm" class="json-highlight"><span v-for="(segment, index) in searchedResponseSegments" :key="index" :class="{ 'search-match': segment.match }">{{ segment.text }}</span></pre>
+              <pre v-else-if="responseView === 'pretty'" class="json-highlight"><span v-for="(token, index) in highlightedResponseBody" :key="index" :class="`json-${token.type}`">{{ token.text }}</span></pre>
+              <pre v-else>{{ prettyResponseBody }}</pre>
+            </div>
           </template>
           <template v-else-if="activeResponseTab === 'headers'">
             <div class="kv-read" v-for="header in response.headers" :key="header.key"><span>{{ header.key }}</span><code>{{ header.value }}</code></div>

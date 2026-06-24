@@ -42,13 +42,13 @@ func TestEffectiveProxyRejectsUnsupportedScheme(t *testing.T) {
 	}
 }
 
-func TestEffectiveProxyRequiresCustomProxyURL(t *testing.T) {
-	_, err := EffectiveProxy(domain.ProxyConfig{Mode: "custom"}, domain.ProxyConfig{Mode: "none"})
-	if err == nil {
-		t.Fatal("expected required proxy URL")
+func TestEffectiveProxyTreatsEmptyCustomProxyURLAsNone(t *testing.T) {
+	got, err := EffectiveProxy(domain.ProxyConfig{Mode: "custom"}, domain.ProxyConfig{Mode: "none"})
+	if err != nil {
+		t.Fatalf("empty custom proxy URL: %v", err)
 	}
-	if err.Error() != "代理地址不能为空" {
-		t.Fatalf("error = %q", err.Error())
+	if got.Mode != "none" || got.URL != "" {
+		t.Fatalf("empty custom proxy URL = %#v", got)
 	}
 }
 
