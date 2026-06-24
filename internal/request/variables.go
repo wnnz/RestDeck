@@ -392,21 +392,55 @@ func extractJSONPath(raw, path string) (string, bool, error) {
 			if end < 0 {
 				return "", false, fmt.Errorf("unsupported JSONPath %q", path)
 			}
-			index, err := strconv.Atoi(rest[1:end])
-			if err != nil {
-				return "", false, fmt.Errorf("unsupported JSONPath %q", path)
+			token := strings.TrimSpace(rest[1:end])
+			if strings.HasPrefix(token, "\"") || strings.HasPrefix(token, "'") {
+				key, err := parseJSONPathBracketKey(token)
+				if err != nil {
+					return "", false, fmt.Errorf("unsupported JSONPath %q", path)
+				}
+				obj, ok := current.(map[string]interface{})
+				if !ok {
+					return "", false, nil
+				}
+				next, ok := obj[key]
+				if !ok {
+					return "", false, nil
+				}
+				current = next
+			} else {
+				index, err := strconv.Atoi(token)
+				if err != nil {
+					return "", false, fmt.Errorf("unsupported JSONPath %q", path)
+				}
+				list, ok := current.([]interface{})
+				if !ok || index < 0 || index >= len(list) {
+					return "", false, nil
+				}
+				current = list[index]
 			}
-			list, ok := current.([]interface{})
-			if !ok || index < 0 || index >= len(list) {
-				return "", false, nil
-			}
-			current = list[index]
 			rest = rest[end+1:]
 			continue
 		}
 		return "", false, fmt.Errorf("unsupported JSONPath %q", path)
 	}
 	return stringifyJSONPathValue(current), true, nil
+}
+
+func parseJSONPathBracketKey(token string) (string, error) {
+	if strings.HasPrefix(token, "\"") {
+		var key string
+		if err := json.Unmarshal([]byte(token), &key); err != nil {
+			return "", err
+		}
+		return key, nil
+	}
+	if !strings.HasPrefix(token, "'") || !strings.HasSuffix(token, "'") || len(token) < 2 {
+		return "", fmt.Errorf("invalid JSONPath key")
+	}
+	key := strings.TrimPrefix(strings.TrimSuffix(token, "'"), "'")
+	key = strings.ReplaceAll(key, `\\`, `\`)
+	key = strings.ReplaceAll(key, `\'`, `'`)
+	return key, nil
 }
 
 func ExtractJSONPath(raw, path string) (string, bool, error) {

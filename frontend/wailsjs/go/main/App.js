@@ -90,8 +90,16 @@ export function ImportPostmanCollection(arg1) {
   return window['go']['main']['App']['ImportPostmanCollection'](arg1);
 }
 
+export function ImportSwaggerURL(arg1) {
+  return window['go']['main']['App']['ImportSwaggerURL'](arg1);
+}
+
 export function InspectOpenAPI(arg1) {
   return window['go']['main']['App']['InspectOpenAPI'](arg1);
+}
+
+export function OpenTextFile(arg1) {
+  return window['go']['main']['App']['OpenTextFile'](arg1);
 }
 
 export function PreviewRequest(arg1, arg2, arg3) {

@@ -643,7 +643,10 @@ button {
 
 .split-editor {
   display: grid;
-  grid-template-rows: minmax(250px, 44%) minmax(260px, 56%);
+  grid-template-rows:
+    minmax(180px, var(--request-height, 44%))
+    8px
+    minmax(180px, var(--response-height, 56%));
   flex: 1;
   min-height: 0;
 }
@@ -656,8 +659,38 @@ button {
   min-height: 0;
 }
 
-.request-editor {
+.response-resizer {
+  position: relative;
+  z-index: 1;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
+  cursor: row-resize;
+}
+
+.response-resizer::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.response-resizer:hover::before,
+.resizing-response-panel .response-resizer::before {
+  opacity: 1;
+  background: var(--accent);
+}
+
+.resizing-response-panel {
+  cursor: row-resize;
+  user-select: none;
 }
 
 .tabs {
@@ -2126,6 +2159,11 @@ iframe {
   box-shadow: 0 22px 56px var(--shadow-strong);
 }
 
+.swagger-modal {
+  height: auto;
+  min-height: 190px;
+}
+
 .code-modal {
   width: min(820px, calc(100% - 36px));
   height: min(620px, calc(100% - 36px));
@@ -2161,7 +2199,54 @@ iframe {
 
 .modal textarea,
 .modal-textarea {
+  flex: 1 1 auto;
+  width: auto;
+  min-height: 0;
   margin: 10px;
+}
+
+.modal-import-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 0;
+}
+
+.modal-import-toolbar + .modal-textarea,
+.modal-import-toolbar + textarea {
+  margin-top: 8px;
+}
+
+.modal-server-field {
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.modal-server-field .volt-select {
+  width: 100%;
+}
+
+.swagger-url-panel {
+  display: block;
+  flex: 0 0 auto;
+  padding: 18px 10px 22px;
+}
+
+.swagger-url-field {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.swagger-url-input {
+  width: 100%;
 }
 
 .code-modal-toolbar {
@@ -2184,9 +2269,15 @@ iframe {
   white-space: pre;
 }
 
-.modal .send-btn {
-  align-self: flex-end;
+.modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   margin: 0 10px 10px;
+}
+
+.modal-actions .send-btn {
   padding: 0 10px;
 }
 

@@ -136,3 +136,99 @@ paths:
 		t.Fatalf("params = %#v", req.Params)
 	}
 }
+
+func TestImportSwagger2Collection(t *testing.T) {
+	raw := `{
+	  "swagger": "2.0",
+	  "info": { "title": "Swagger API", "version": "1.0.0" },
+	  "host": "api.example.com",
+	  "basePath": "/v1",
+	  "schemes": ["https", "http"],
+	  "paths": {
+	    "/users/{id}": {
+	      "parameters": [
+	        { "name": "id", "in": "path", "type": "string", "default": "u-1" }
+	      ],
+	      "get": {
+	        "summary": "Get user",
+	        "parameters": [
+	          { "name": "verbose", "in": "query", "type": "boolean", "default": true },
+	          { "name": "X-Trace", "in": "header", "type": "string", "default": "trace-1" }
+	        ]
+	      },
+	      "post": {
+	        "summary": "Update user",
+	        "parameters": [
+	          {
+	            "name": "payload",
+	            "in": "body",
+	            "schema": {
+	              "type": "object",
+	              "properties": {
+	                "name": { "type": "string", "example": "Ada" }
+	              }
+	            }
+	          }
+	        ]
+	      }
+	    },
+	    "/upload": {
+	      "post": {
+	        "summary": "Upload avatar",
+	        "consumes": ["multipart/form-data"],
+	        "parameters": [
+	          { "name": "avatar", "in": "formData", "type": "file" },
+	          { "name": "name", "in": "formData", "type": "string", "default": "Ada" }
+	        ]
+	      }
+	    }
+	  }
+	}`
+	info, err := InspectOpenAPI(raw)
+	if err != nil {
+		t.Fatalf("inspect swagger: %v", err)
+	}
+	if len(info.Servers) != 2 || info.Servers[0] != "https://api.example.com/v1" {
+		t.Fatalf("servers = %#v", info.Servers)
+	}
+	collection, err := ImportOpenAPI(raw)
+	if err != nil {
+		t.Fatalf("import swagger: %v", err)
+	}
+	if collection.Name != "Swagger API" {
+		t.Fatalf("name = %q", collection.Name)
+	}
+	if len(collection.Requests) != 3 {
+		t.Fatalf("requests = %d", len(collection.Requests))
+	}
+	get := findRequestByURL(collection.Requests, "https://api.example.com/v1/users/{{id}}", "GET")
+	if get.Method != "GET" || get.URL != "https://api.example.com/v1/users/{{id}}" {
+		t.Fatalf("unexpected GET request: %#v", get)
+	}
+	if len(get.Params) != 2 || get.Params[0].Key != "id" || get.Params[1].Key != "verbose" {
+		t.Fatalf("params = %#v", get.Params)
+	}
+	if len(get.Headers) != 1 || get.Headers[0].Key != "X-Trace" {
+		t.Fatalf("headers = %#v", get.Headers)
+	}
+	post := findRequestByURL(collection.Requests, "https://api.example.com/v1/users/{{id}}", "POST")
+	if post.BodyMode != domain.BodyModeJSON || post.Body == "" {
+		t.Fatalf("body = %#v", post)
+	}
+	upload := findRequestByURL(collection.Requests, "https://api.example.com/v1/upload", "POST")
+	if upload.BodyMode != domain.BodyModeForm {
+		t.Fatalf("upload body mode = %q", upload.BodyMode)
+	}
+	if len(upload.FormItems) != 2 || upload.FormItems[0].Type != "file" || upload.FormItems[1].Value != "Ada" {
+		t.Fatalf("form items = %#v", upload.FormItems)
+	}
+}
+
+func findRequestByURL(requests []domain.Request, url, method string) domain.Request {
+	for _, request := range requests {
+		if request.URL == url && request.Method == method {
+			return request
+		}
+	}
+	return domain.Request{}
+}

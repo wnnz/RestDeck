@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { CheckCircle2, Clipboard, Clock3, Download, FileJson2, Loader2, Plus, RefreshCw, Search, Send, Trash2, Variable, Wand2, XCircle } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import VoltSelect from './volt/VoltSelect.vue'
@@ -43,6 +43,7 @@ const responseView = defineModel<ResponseView>('responseView', { required: true 
 const responseSearch = defineModel<string>('responseSearch', { required: true })
 const responseJSONPath = defineModel<string>('responseJSONPath', { required: true })
 const responseVariableKey = defineModel<string>('responseVariableKey', { required: true })
+const splitEditorRef = ref<HTMLElement | null>(null)
 const requestTitleInput = ref<InstanceType<typeof VoltInputText> | null>(null)
 
 const emit = defineEmits<{
@@ -63,6 +64,7 @@ const emit = defineEmits<{
 }>()
 
 const formEditorMode = ref<'table' | 'text'>('table')
+const responseHeightPercent = ref(Number(localStorage.getItem('restdeck.responseHeightPercent')) || 56)
 const methodOptions = computed(() => props.methods.map((method) => ({ value: method, label: method })))
 const addToOptions = computed(() => [{ value: 'header', label: props.t.headers }, { value: 'query', label: props.t.params }])
 const formTypeOptions = computed(() => [{ value: 'text', label: props.t.text }, { value: 'file', label: props.t.file }])
@@ -96,6 +98,46 @@ const requestTitleInputStyle = computed(() => {
   const text = activeRequest.value?.name || props.t.requestName
   const units = Array.from(text).reduce((total, char) => total + (char.charCodeAt(0) > 255 ? 2 : 1), 0)
   return { width: `${Math.min(Math.max(units + 3, 12), 52)}ch` }
+})
+const splitEditorStyle = computed(() => ({
+  '--response-height': `${responseHeightPercent.value}%`,
+  '--request-height': `${100 - responseHeightPercent.value}%`
+}))
+
+let responseResizeStartY = 0
+let responseResizeStartPercent = 56
+
+function startResponseResize(event: PointerEvent) {
+  const container = splitEditorRef.value
+  if (!container) return
+  event.preventDefault()
+  responseResizeStartY = event.clientY
+  responseResizeStartPercent = responseHeightPercent.value
+  window.addEventListener('pointermove', resizeResponsePanel)
+  window.addEventListener('pointerup', stopResponseResize, { once: true })
+  document.body.classList.add('resizing-response-panel')
+}
+
+function resizeResponsePanel(event: PointerEvent) {
+  const container = splitEditorRef.value
+  if (!container) return
+  const height = container.getBoundingClientRect().height
+  if (height <= 0) return
+  const deltaPercent = ((responseResizeStartY - event.clientY) / height) * 100
+  const next = Math.min(78, Math.max(28, responseResizeStartPercent + deltaPercent))
+  responseHeightPercent.value = Math.round(next * 10) / 10
+}
+
+function stopResponseResize() {
+  window.removeEventListener('pointermove', resizeResponsePanel)
+  localStorage.setItem('restdeck.responseHeightPercent', String(responseHeightPercent.value))
+  document.body.classList.remove('resizing-response-panel')
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener('pointermove', resizeResponsePanel)
+  window.removeEventListener('pointerup', stopResponseResize)
+  document.body.classList.remove('resizing-response-panel')
 })
 
 function editRequestTitle() {
@@ -258,7 +300,7 @@ function newFormItem() {
       </VoltButton>
     </div>
 
-    <div class="split-editor">
+    <div ref="splitEditorRef" class="split-editor" :style="splitEditorStyle">
       <section class="request-editor">
         <VoltTabsBar v-model="activeRequestTab" :items="requestTabs" />
 
@@ -440,6 +482,8 @@ function newFormItem() {
           </div>
         </div>
       </section>
+
+      <div class="response-resizer" role="separator" aria-orientation="horizontal" @pointerdown="startResponseResize"></div>
 
       <section class="response-editor">
         <div class="response-meta">

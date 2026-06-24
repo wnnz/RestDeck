@@ -40,7 +40,7 @@ func ResolveProxyForURL(requestProxy, defaultProxy domain.ProxyConfig, rawURL st
 		return domain.ProxyConfig{Mode: "none"}, source, true, nil
 	}
 	if effective.URL == "" {
-		return domain.ProxyConfig{}, source, false, fmt.Errorf("proxy URL is required")
+		return domain.ProxyConfig{}, source, false, fmt.Errorf("代理地址不能为空")
 	}
 	parsed, err := url.Parse(effective.URL)
 	if err != nil {
@@ -50,7 +50,7 @@ func ResolveProxyForURL(requestProxy, defaultProxy domain.ProxyConfig, rawURL st
 	case "http", "https", "socks5":
 		return domain.ProxyConfig{Mode: "custom", URL: effective.URL, NoProxy: effective.NoProxy}, source, false, nil
 	default:
-		return domain.ProxyConfig{}, source, false, fmt.Errorf("unsupported proxy scheme %q", parsed.Scheme)
+		return domain.ProxyConfig{}, source, false, fmt.Errorf("不支持的代理协议 %q", parsed.Scheme)
 	}
 }
 
@@ -94,7 +94,7 @@ func HTTPTransportForProxy(effective domain.ProxyConfig) (*http.Transport, error
 			}
 		}
 	default:
-		return nil, fmt.Errorf("unsupported proxy scheme %q", parsed.Scheme)
+		return nil, fmt.Errorf("不支持的代理协议 %q", parsed.Scheme)
 	}
 	return transport, nil
 }

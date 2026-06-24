@@ -31,7 +31,9 @@ import {
   ImportOpenAPICollection,
   ImportOpenAPICollectionWithOptions,
   ImportPostmanCollection,
+  ImportSwaggerURL,
   InspectOpenAPI,
+  OpenTextFile,
   PreviewRequest,
   QueryJSONPath,
   SaveRunnerResult,
@@ -98,6 +100,7 @@ const statusMessage = ref('')
 const activeModal = ref<ActiveModal>(null)
 const postmanText = ref('')
 const openAPIText = ref('')
+const swaggerUrl = ref('')
 const harText = ref('')
 const fetchText = ref('')
 const curlText = ref('')
@@ -118,6 +121,7 @@ const variableDebugReport = ref<domain.VariableDebugReport | null>(null)
 const variableDebugBusy = ref(false)
 const openAPIServers = ref<string[]>([])
 const selectedOpenAPIServer = ref('')
+const exportFilename = ref('restdeck-export.json')
 const wsDraft = reactive({
   url: 'wss://echo.websocket.events',
   message: '{ "hello": "restdeck" }',
@@ -185,6 +189,8 @@ const activeModalTitle = computed(() => {
       return t.value.importCurlRequest
     case 'openapi':
       return t.value.importOpenAPICollection
+    case 'swagger':
+      return t.value.importSwaggerCollection
     case 'har':
       return t.value.importHARCollection
     case 'postman':
@@ -410,7 +416,7 @@ watch(settingsDraft, () => {
 }, { deep: true })
 
 watch(openAPIText, () => {
-  if (activeModal.value !== 'openapi') return
+  if (activeModal.value !== 'openapi' && activeModal.value !== 'swagger') return
   if (openAPIInspectTimer) clearTimeout(openAPIInspectTimer)
   openAPIInspectTimer = setTimeout(() => { void inspectOpenAPIText() }, 350)
 })
@@ -1018,6 +1024,23 @@ async function importOpenAPICollection() {
   }
 }
 
+async function importSwaggerCollection() {
+  if (!swaggerUrl.value.trim()) return
+  await flushRequestAutosave()
+  busy.value = true
+  try {
+    const next = await ImportSwaggerURL(swaggerUrl.value)
+    setState(next)
+    activeModal.value = null
+    swaggerUrl.value = ''
+    statusMessage.value = t.value.swaggerImported
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
+}
+
 async function inspectOpenAPIText() {
   if (!openAPIText.value.trim()) {
     openAPIServers.value = []
@@ -1100,44 +1123,41 @@ async function selectLatestImportedRequest(previousRequestIds: Set<string>) {
 
 function openPostmanModal() {
   closeCollectionMenus()
-  postmanText.value = JSON.stringify({ info: { name: 'Imported' }, item: [] }, null, 2)
+  postmanText.value = ''
   activeModal.value = 'postman'
 }
 
 function openOpenAPIModal() {
   closeCollectionMenus()
-  openAPIText.value = JSON.stringify({
-    openapi: '3.0.3',
-    info: { title: 'Imported API', version: '1.0.0' },
-    servers: [{ url: '{{baseUrl}}' }],
-    paths: {}
-  }, null, 2)
-  openAPIServers.value = ['{{baseUrl}}']
-  selectedOpenAPIServer.value = '{{baseUrl}}'
+  openAPIText.value = ''
+  openAPIServers.value = []
+  selectedOpenAPIServer.value = ''
   activeModal.value = 'openapi'
+}
+
+function openSwaggerModal() {
+  closeCollectionMenus()
+  swaggerUrl.value = ''
+  openAPIServers.value = []
+  selectedOpenAPIServer.value = ''
+  activeModal.value = 'swagger'
 }
 
 function openHARModal() {
   closeCollectionMenus()
-  harText.value = JSON.stringify({ log: { version: '1.2', creator: { name: 'Browser', version: '1' }, entries: [] } }, null, 2)
+  harText.value = ''
   activeModal.value = 'har'
 }
 
 function openFetchModal() {
   closeCollectionMenus()
-  fetchText.value = `fetch("https://api.example.com/v1/resource", {
-  "headers": {
-    "accept": "application/json"
-  },
-  "method": "GET"
-});`
+  fetchText.value = ''
   activeModal.value = 'fetch'
 }
 
 function openCurlModal() {
   closeCollectionMenus()
-  curlText.value = `curl 'https://api.example.com/v1/resource' \\
-  -H 'accept: application/json'`
+  curlText.value = ''
   activeModal.value = 'curl'
 }
 
@@ -1148,9 +1168,39 @@ function closeModal() {
 function submitActiveModal() {
   if (activeModal.value === 'postman') return importPostmanCollection()
   if (activeModal.value === 'openapi') return importOpenAPICollection()
+  if (activeModal.value === 'swagger') return importSwaggerCollection()
   if (activeModal.value === 'har') return importHARCollection()
   if (activeModal.value === 'fetch') return importFetchRequest()
   if (activeModal.value === 'curl') return importCurlRequest()
+}
+
+async function importActiveModalFromFile() {
+  if (!activeModal.value || activeModal.value === 'export') return
+  try {
+    const content = await OpenTextFile(activeModalTitle.value)
+    if (!content) return
+    if (activeModal.value === 'postman') postmanText.value = content
+    if (activeModal.value === 'openapi') {
+      openAPIText.value = content
+      await inspectOpenAPIText()
+    }
+    if (activeModal.value === 'har') harText.value = content
+    if (activeModal.value === 'fetch') fetchText.value = content
+    if (activeModal.value === 'curl') curlText.value = content
+    statusMessage.value = t.value.fileLoaded
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
+
+async function exportActiveModalToFile() {
+  if (activeModal.value !== 'export' || !exportText.value) return
+  try {
+    const path = await SaveTextFile(t.value.exportToFile, exportFilename.value, exportText.value)
+    if (path) statusMessage.value = t.value.fileSaved
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
 }
 
 async function exportCollection() {
@@ -1159,6 +1209,7 @@ async function exportCollection() {
   await flushRequestAutosave()
   try {
     exportText.value = await ExportPostmanCollection(collection.id)
+    exportFilename.value = `${safeFilename(collection.name || 'restdeck-collection')}.postman_collection.json`
     activeModal.value = 'export'
     closeCollectionMenus()
     statusMessage.value = t.value.collectionExported
@@ -1173,6 +1224,7 @@ async function exportOpenAPICollection() {
   await flushRequestAutosave()
   try {
     exportText.value = await ExportOpenAPICollection(collection.id)
+    exportFilename.value = `${safeFilename(collection.name || 'restdeck-openapi')}.openapi.json`
     activeModal.value = 'export'
     closeCollectionMenus()
     statusMessage.value = t.value.openAPIExported
@@ -1187,6 +1239,7 @@ async function exportHARCollection() {
   await flushRequestAutosave()
   try {
     exportText.value = await ExportHARCollection(collection.id)
+    exportFilename.value = `${safeFilename(collection.name || 'restdeck')}.har`
     activeModal.value = 'export'
     closeCollectionMenus()
     statusMessage.value = t.value.harExported
@@ -1200,6 +1253,7 @@ async function exportRequestFromMenu(request: domain.Request) {
   const collection = collectionForRequest(source)
   try {
     exportText.value = await ExportPostmanRequest(source, collection?.name ?? t.value.collections)
+    exportFilename.value = `${safeFilename(source.name || 'restdeck-request')}.postman_request.json`
     activeModal.value = 'export'
     statusMessage.value = t.value.requestExported
   } catch (error) {
@@ -1223,6 +1277,10 @@ function collectionForRequest(request: domain.Request) {
   return state.value?.collections?.find((collection) => collection.id === request.collectionId)
     ?? activeCollection.value
     ?? null
+}
+
+function safeFilename(value: string) {
+  return value.trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/\s+/g, ' ').slice(0, 80) || 'restdeck'
 }
 
 async function saveOrderedRequests(collectionID: string, requests: domain.Request[]) {
@@ -1625,6 +1683,7 @@ async function closeWindow() {
         @open-curl-modal="openCurlModal"
         @open-postman-modal="openPostmanModal"
         @open-open-a-p-i-modal="openOpenAPIModal"
+        @open-swagger-modal="openSwaggerModal"
         @open-h-a-r-modal="openHARModal"
         @export-collection="exportCollection"
         @export-open-a-p-i-collection="exportOpenAPICollection"
@@ -1776,6 +1835,7 @@ async function closeWindow() {
   <ImportModal
     v-model:postman-text="postmanText"
     v-model:open-a-p-i-text="openAPIText"
+    v-model:swagger-url="swaggerUrl"
     v-model:har-text="harText"
     v-model:selected-open-a-p-i-server="selectedOpenAPIServer"
     v-model:fetch-text="fetchText"
@@ -1788,6 +1848,8 @@ async function closeWindow() {
     :open-a-p-i-servers="openAPIServers"
     @close="closeModal"
     @submit="submitActiveModal"
+    @import-from-file="importActiveModalFromFile"
+    @export-to-file="exportActiveModalToFile"
   />
 
   <RequestCodeModal

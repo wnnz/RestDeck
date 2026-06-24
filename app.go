@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,6 +98,20 @@ func (a *App) SelectFile() (string, error) {
 	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "选择文件",
 	})
+}
+
+func (a *App) OpenTextFile(title string) (string, error) {
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: fallback(title, "打开文件"),
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
 }
 
 func (a *App) DeleteRequest(id string) (domain.WorkspaceState, error) {
@@ -312,6 +329,55 @@ func (a *App) TestVariable(variable domain.KeyValue, environmentID string, globa
 	return a.newResolver(env, globals, state.Settings.DefaultProxy).ResolveVariableForDebug(variable.Key)
 }
 
+func (a *App) fetchTextURL(rawURL string) (string, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return "", fmt.Errorf("Swagger URL 不能为空")
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("Swagger URL 无效")
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+	default:
+		return "", fmt.Errorf("Swagger URL 只支持 http 或 https")
+	}
+	state, err := a.store.State(a.ctx)
+	if err != nil {
+		return "", err
+	}
+	effectiveProxy, err := reqsvc.EffectiveProxyForURL(domain.ProxyConfig{Mode: "inherit"}, state.Settings.DefaultProxy, rawURL)
+	if err != nil {
+		return "", err
+	}
+	transport, err := reqsvc.HTTPTransportForProxy(effectiveProxy)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json, application/yaml, text/yaml, text/plain, */*")
+	client := &http.Client{Timeout: 30 * time.Second, Transport: transport}
+	res, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return "", fmt.Errorf("读取 Swagger 失败: HTTP %d", res.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(res.Body, 20*1024*1024))
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
 func (a *App) SaveRunnerResult(result domain.RunnerResult) (domain.WorkspaceState, error) {
 	if err := a.store.AddRunnerResult(a.ctx, result); err != nil {
 		return domain.WorkspaceState{}, err
@@ -358,6 +424,14 @@ func (a *App) ImportOpenAPICollectionWithOptions(raw string, options domain.Open
 		}
 	}
 	return a.GetState()
+}
+
+func (a *App) ImportSwaggerURL(rawURL string) (domain.WorkspaceState, error) {
+	content, err := a.fetchTextURL(rawURL)
+	if err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	return a.ImportOpenAPICollection(content)
 }
 
 func (a *App) InspectOpenAPI(raw string) (domain.OpenAPIInfo, error) {

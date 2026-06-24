@@ -19,20 +19,24 @@ var openAPIHTTPMethods = map[string]bool{
 }
 
 type openAPIDoc struct {
-	OpenAPI string                    `json:"openapi,omitempty"`
-	Info    openAPIInfo               `json:"info"`
-	Servers []openAPIServer           `json:"servers,omitempty"`
-	Paths   map[string]map[string]any `json:"paths"`
+	OpenAPI  string                    `json:"openapi,omitempty" yaml:"openapi,omitempty"`
+	Swagger  string                    `json:"swagger,omitempty" yaml:"swagger,omitempty"`
+	Host     string                    `json:"host,omitempty" yaml:"host,omitempty"`
+	BasePath string                    `json:"basePath,omitempty" yaml:"basePath,omitempty"`
+	Schemes  []string                  `json:"schemes,omitempty" yaml:"schemes,omitempty"`
+	Info     openAPIInfo               `json:"info" yaml:"info"`
+	Servers  []openAPIServer           `json:"servers,omitempty" yaml:"servers,omitempty"`
+	Paths    map[string]map[string]any `json:"paths" yaml:"paths"`
 }
 
 type openAPIInfo struct {
-	Title       string `json:"title"`
-	Version     string `json:"version"`
-	Description string `json:"description,omitempty"`
+	Title       string `json:"title" yaml:"title"`
+	Version     string `json:"version" yaml:"version"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 type openAPIServer struct {
-	URL string `json:"url"`
+	URL string `json:"url" yaml:"url"`
 }
 
 func ImportOpenAPI(raw string) (domain.Collection, error) {
@@ -60,6 +64,8 @@ func ImportOpenAPIWithOptions(raw string, options domain.OpenAPIImportOptions) (
 		baseURL = strings.TrimRight(strings.TrimSpace(options.ServerURL), "/")
 	} else if len(doc.Servers) > 0 {
 		baseURL = strings.TrimRight(doc.Servers[0].URL, "/")
+	} else if doc.Swagger != "" {
+		baseURL = strings.TrimRight(swaggerBaseURL(doc), "/")
 	}
 
 	paths := make([]string, 0, len(doc.Paths))
@@ -96,11 +102,14 @@ func InspectOpenAPI(raw string) (domain.OpenAPIInfo, error) {
 			info.Servers = append(info.Servers, server.URL)
 		}
 	}
+	if len(info.Servers) == 0 && doc.Swagger != "" {
+		info.Servers = swaggerServers(doc)
+	}
 	return info, nil
 }
 
 func decodeOpenAPI(raw string, doc *openAPIDoc) error {
-	if err := json.Unmarshal([]byte(raw), doc); err == nil && (doc.OpenAPI != "" || len(doc.Paths) > 0) {
+	if err := json.Unmarshal([]byte(raw), doc); err == nil && (doc.OpenAPI != "" || doc.Swagger != "" || len(doc.Paths) > 0) {
 		return nil
 	}
 	if err := yaml.Unmarshal([]byte(raw), doc); err != nil {
@@ -176,11 +185,23 @@ func importOpenAPIOperation(collectionID, baseURL, path, method string, operatio
 	}
 	for _, parameter := range append(pathParameters, arrayOfMaps(operation["parameters"])...) {
 		target := stringValue(parameter, "in")
+		if target == "body" {
+			importSwaggerBodyParameter(&request, parameter)
+			continue
+		}
+		if target == "formData" {
+			importSwaggerFormParameter(&request, parameter)
+			continue
+		}
+		schema := mapValue(parameter, "schema")
+		if len(schema) == 0 {
+			schema = parameter
+		}
 		row := domain.KeyValue{
 			ID:          uuid.NewString(),
 			Enabled:     true,
 			Key:         stringValue(parameter, "name"),
-			Value:       sampleFromSchema(mapValue(parameter, "schema")),
+			Value:       sampleFromSchema(schema),
 			Description: stringValue(parameter, "description"),
 		}
 		switch target {
@@ -197,6 +218,38 @@ func importOpenAPIOperation(collectionID, baseURL, path, method string, operatio
 	}
 	importOpenAPIRequestBody(&request, mapValue(operation, "requestBody"))
 	return request
+}
+
+func importSwaggerBodyParameter(request *domain.Request, parameter map[string]any) {
+	schema := mapValue(parameter, "schema")
+	if len(schema) == 0 {
+		return
+	}
+	request.BodyMode = domain.BodyModeJSON
+	request.Body = jsonSampleString(sampleFromSchemaValue(schema))
+}
+
+func importSwaggerFormParameter(request *domain.Request, parameter map[string]any) {
+	itemType := "text"
+	if stringValue(parameter, "type") == "file" || stringValue(parameter, "format") == "binary" {
+		itemType = "file"
+		request.BodyMode = domain.BodyModeForm
+	} else if request.BodyMode != domain.BodyModeForm {
+		request.BodyMode = domain.BodyModeURLEncoded
+	}
+	request.FormItems = append(request.FormItems, domain.FormItem{
+		ID:          uuid.NewString(),
+		Enabled:     true,
+		Key:         stringValue(parameter, "name"),
+		Type:        itemType,
+		Value:       sampleFromSchema(parameter),
+		Description: stringValue(parameter, "description"),
+	})
+	if request.BodyMode == domain.BodyModeForm {
+		request.Body = formItemsToBody(request.FormItems)
+		return
+	}
+	request.Body = urlEncodedBodyFromFormItems(request.FormItems)
 }
 
 func importOpenAPIRequestBody(request *domain.Request, requestBody map[string]any) {
@@ -266,6 +319,52 @@ func kvBodyFromSchema(media any) string {
 	lines := []string{}
 	for _, item := range formItemsFromOpenAPISchema(media) {
 		if item.Type == "file" {
+			continue
+		}
+		lines = append(lines, item.Key+"="+item.Value)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func swaggerServers(doc openAPIDoc) []string {
+	basePath := strings.TrimSpace(doc.BasePath)
+	if basePath == "" {
+		basePath = "/"
+	}
+	if !strings.HasPrefix(basePath, "/") {
+		basePath = "/" + basePath
+	}
+	host := strings.TrimSpace(doc.Host)
+	if host == "" {
+		return []string{strings.TrimRight(basePath, "/")}
+	}
+	schemes := doc.Schemes
+	if len(schemes) == 0 {
+		schemes = []string{"https"}
+	}
+	servers := []string{}
+	for _, scheme := range schemes {
+		scheme = strings.TrimSpace(scheme)
+		if scheme == "" {
+			continue
+		}
+		servers = append(servers, strings.TrimRight(scheme+"://"+host+basePath, "/"))
+	}
+	return servers
+}
+
+func swaggerBaseURL(doc openAPIDoc) string {
+	servers := swaggerServers(doc)
+	if len(servers) == 0 {
+		return ""
+	}
+	return servers[0]
+}
+
+func urlEncodedBodyFromFormItems(items []domain.FormItem) string {
+	lines := []string{}
+	for _, item := range items {
+		if !item.Enabled || item.Key == "" || item.Type == "file" {
 			continue
 		}
 		lines = append(lines, item.Key+"="+item.Value)

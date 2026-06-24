@@ -47,7 +47,11 @@ export function ImportOpenAPICollectionWithOptions(arg1:string,arg2:domain.OpenA
 
 export function ImportPostmanCollection(arg1:string):Promise<domain.WorkspaceState>;
 
+export function ImportSwaggerURL(arg1:string):Promise<domain.WorkspaceState>;
+
 export function InspectOpenAPI(arg1:string):Promise<domain.OpenAPIInfo>;
+
+export function OpenTextFile(arg1:string):Promise<string>;
 
 export function PreviewRequest(arg1:domain.Request,arg2:string,arg3:Array<domain.KeyValue>):Promise<domain.PreparedRequest>;
 

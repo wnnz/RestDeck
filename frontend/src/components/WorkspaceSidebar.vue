@@ -41,6 +41,7 @@ const emit = defineEmits<{
   openCurlModal: []
   openPostmanModal: []
   openOpenAPIModal: []
+  openSwaggerModal: []
   openHARModal: []
   exportCollection: []
   exportOpenAPICollection: []
@@ -139,6 +140,11 @@ function openPostmanModal() {
 function openOpenAPIModal() {
   closeActionMenus()
   emit('openOpenAPIModal')
+}
+
+function openSwaggerModal() {
+  closeActionMenus()
+  emit('openSwaggerModal')
 }
 
 function openHARModal() {
@@ -345,6 +351,10 @@ function deleteEnvironment(id: string) {
               <VoltButton variant="ghost" @click="openOpenAPIModal">
                 <Import :size="14" />
                 {{ t.importFromOpenAPI }}
+              </VoltButton>
+              <VoltButton variant="ghost" @click="openSwaggerModal">
+                <Import :size="14" />
+                {{ t.importFromSwagger }}
               </VoltButton>
               <VoltButton variant="ghost" @click="openHARModal">
                 <Import :size="14" />

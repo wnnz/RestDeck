@@ -65,6 +65,24 @@ func TestResolverReadsResponseJSONPathFromHistory(t *testing.T) {
 	}
 }
 
+func TestExtractJSONPathSupportsBracketStringKeys(t *testing.T) {
+	raw := `{"headers":{"Accept-Encoding":"gzip","User-Agent":"RestDeck"},"items":[{"x-value":3}]}`
+	cases := map[string]string{
+		`$.headers["Accept-Encoding"]`: "gzip",
+		`$.headers['User-Agent']`:      "RestDeck",
+		`$.items[0]["x-value"]`:        "3",
+	}
+	for path, expected := range cases {
+		got, ok, err := ExtractJSONPath(raw, path)
+		if err != nil {
+			t.Fatalf("extract %s: %v", path, err)
+		}
+		if !ok || got != expected {
+			t.Fatalf("extract %s = %q, %v", path, got, ok)
+		}
+	}
+}
+
 func TestResolverRefreshesResponseVariableAfterTimeout(t *testing.T) {
 	env := domain.Environment{Variables: []domain.KeyValue{{
 		Enabled:             true,

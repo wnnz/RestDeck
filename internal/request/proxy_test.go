@@ -1,6 +1,7 @@
 package request
 
 import (
+	"strings"
 	"testing"
 
 	"restdeck/internal/domain"
@@ -35,6 +36,19 @@ func TestEffectiveProxyRejectsUnsupportedScheme(t *testing.T) {
 	_, err := EffectiveProxy(domain.ProxyConfig{Mode: "custom", URL: "ftp://127.0.0.1:21"}, domain.ProxyConfig{Mode: "none"})
 	if err == nil {
 		t.Fatal("expected unsupported proxy scheme")
+	}
+	if !strings.Contains(err.Error(), "不支持的代理协议") {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
+func TestEffectiveProxyRequiresCustomProxyURL(t *testing.T) {
+	_, err := EffectiveProxy(domain.ProxyConfig{Mode: "custom"}, domain.ProxyConfig{Mode: "none"})
+	if err == nil {
+		t.Fatal("expected required proxy URL")
+	}
+	if err.Error() != "代理地址不能为空" {
+		t.Fatalf("error = %q", err.Error())
 	}
 }
 
