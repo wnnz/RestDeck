@@ -117,6 +117,7 @@ button {
 .window-title {
   display: flex;
   align-items: center;
+  gap: 8px;
   flex: 0 0 132px;
   height: 100%;
   min-width: 0;
@@ -128,6 +129,13 @@ button {
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.window-title-icon {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  object-fit: contain;
 }
 
 .window-controls {

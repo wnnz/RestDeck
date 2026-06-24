@@ -9,5 +9,11 @@
   "author": {
     "name": "wzheng",
     "email": "2468077719@qq.com"
+  },
+  "info": {
+    "companyName": "wzheng",
+    "productName": "RestDeck",
+    "productVersion": "0.3.0",
+    "comments": "Local-first desktop API debugging tool."
   }
 }
