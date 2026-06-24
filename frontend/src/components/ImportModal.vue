@@ -4,6 +4,7 @@ import type { Translation } from '../i18n/messages'
 import type { ActiveModal } from '../types'
 import VoltButton from './volt/VoltButton.vue'
 import VoltDialog from './volt/VoltDialog.vue'
+import VoltSelect from './volt/VoltSelect.vue'
 import VoltTextarea from './volt/VoltTextarea.vue'
 
 defineProps<{
@@ -13,9 +14,12 @@ defineProps<{
   t: Translation
   postmanText: string
   openAPIText: string
+  harText: string
   fetchText: string
   curlText: string
   exportText: string
+  openAPIServers: string[]
+  selectedOpenAPIServer: string
 }>()
 
 const emit = defineEmits<{
@@ -23,6 +27,8 @@ const emit = defineEmits<{
   submit: []
   'update:postmanText': [value: string]
   'update:openAPIText': [value: string]
+  'update:harText': [value: string]
+  'update:selectedOpenAPIServer': [value: string]
   'update:fetchText': [value: string]
   'update:curlText': [value: string]
 }>()
@@ -48,13 +54,30 @@ function updateVisible(value: boolean) {
       :aria-label="t.postmanJSON"
       @update:model-value="emit('update:postmanText', String($event))"
     />
+    <template v-else-if="activeModal === 'openapi'">
+      <label v-if="openAPIServers.length" class="modal-field">
+        <span>{{ t.openAPIServer }}</span>
+        <VoltSelect
+          :model-value="selectedOpenAPIServer"
+          :options="openAPIServers.map((server) => ({ value: server, label: server }))"
+          @change="emit('update:selectedOpenAPIServer', String($event))"
+        />
+      </label>
+      <VoltTextarea
+        :model-value="openAPIText"
+        input-class="modal-textarea"
+        :spellcheck="false"
+        :aria-label="t.openAPIJSON"
+        @update:model-value="emit('update:openAPIText', String($event))"
+      />
+    </template>
     <VoltTextarea
-      v-else-if="activeModal === 'openapi'"
-      :model-value="openAPIText"
+      v-else-if="activeModal === 'har'"
+      :model-value="harText"
       input-class="modal-textarea"
       :spellcheck="false"
-      :aria-label="t.openAPIJSON"
-      @update:model-value="emit('update:openAPIText', String($event))"
+      :aria-label="t.harJSON"
+      @update:model-value="emit('update:harText', String($event))"
     />
     <VoltTextarea
       v-else-if="activeModal === 'fetch'"

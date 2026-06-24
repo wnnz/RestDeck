@@ -39,6 +39,26 @@ func TestStorePersistsWorkspaceState(t *testing.T) {
 	if err := s.AddHistory(t.Context(), domain.HistoryItem{ID: "h1", Name: "Ping", Method: "GET", URL: "https://example.com", Request: req, Response: domain.Response{StatusCode: 200}}); err != nil {
 		t.Fatalf("add history: %v", err)
 	}
+	if err := s.AddRunnerResult(t.Context(), domain.RunnerResult{
+		ID:            "run1",
+		CollectionID:  "c1",
+		EnvironmentID: "e1",
+		Name:          "Demo",
+		Iterations:    1,
+		Passed:        1,
+		Details: []domain.RunnerRequestResult{{
+			RequestID:  "r1",
+			Iteration:  1,
+			Name:       "Ping",
+			Method:     "GET",
+			URL:        "https://example.com",
+			Status:     "passed",
+			StatusCode: 200,
+			Response:   domain.Response{StatusCode: 200},
+		}},
+	}); err != nil {
+		t.Fatalf("add runner result: %v", err)
+	}
 
 	state, err := s.State(t.Context())
 	if err != nil {
@@ -52,6 +72,9 @@ func TestStorePersistsWorkspaceState(t *testing.T) {
 	}
 	if len(state.History) != 1 {
 		t.Fatalf("history length = %d", len(state.History))
+	}
+	if len(state.RunnerHistory) != 1 || len(state.RunnerHistory[0].Details) != 1 {
+		t.Fatalf("runner history = %#v", state.RunnerHistory)
 	}
 }
 

@@ -185,6 +185,9 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "requests", "proxy_json", `TEXT NOT NULL DEFAULT '{}'`); err != nil {
 		return err
 	}
+	if err := s.ensureColumn(ctx, "runner_results", "details_json", `TEXT NOT NULL DEFAULT '[]'`); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -293,6 +296,10 @@ func (s *Store) State(ctx context.Context) (domain.WorkspaceState, error) {
 	if err != nil {
 		return domain.WorkspaceState{}, err
 	}
+	runnerHistory, err := s.ListRunnerResults(ctx, 30)
+	if err != nil {
+		return domain.WorkspaceState{}, err
+	}
 	settings, err := s.GetSettings(ctx)
 	if err != nil {
 		return domain.WorkspaceState{}, err
@@ -308,6 +315,7 @@ func (s *Store) State(ctx context.Context) (domain.WorkspaceState, error) {
 		Collections:         collections,
 		Environments:        environments,
 		History:             history,
+		RunnerHistory:       runnerHistory,
 		Globals:             globals,
 		Cookies:             cookies,
 		ActiveEnvironmentID: active,
@@ -816,12 +824,70 @@ func (s *Store) AddRunnerResult(ctx context.Context, result domain.RunnerResult)
 	if err != nil {
 		return err
 	}
+	if len(result.Details) > 0 {
+		for i := range result.Details {
+			if result.Details[i].ID == "" {
+				result.Details[i].ID = uuid.NewString()
+			}
+		}
+		detailItems := make([]domain.TestResult, 0, len(result.Details))
+		for _, detail := range result.Details {
+			detailItems = append(detailItems, domain.TestResult{
+				Name:    detail.Name,
+				Passed:  detail.Status == "passed",
+				Message: detail.Message,
+			})
+		}
+		if len(result.Items) == 0 {
+			result.Items = detailItems
+			itemsJSON, err = marshal(result.Items)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	detailsJSON, err := marshal(result.Details)
+	if err != nil {
+		return err
+	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO runner_results
-		(id, collection_id, environment_id, name, iterations, passed, failed, duration_ms, items_json, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(id, collection_id, environment_id, name, iterations, passed, failed, duration_ms, items_json, details_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		result.ID, result.CollectionID, result.EnvironmentID, result.Name, result.Iterations, result.Passed,
-		result.Failed, result.DurationMs, itemsJSON, formatTime(result.CreatedAt))
+		result.Failed, result.DurationMs, itemsJSON, detailsJSON, formatTime(result.CreatedAt))
 	return err
+}
+
+func (s *Store) ListRunnerResults(ctx context.Context, limit int) ([]domain.RunnerResult, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, collection_id, environment_id, name, iterations, passed, failed,
+		duration_ms, items_json, details_json, created_at FROM runner_results ORDER BY created_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	results := []domain.RunnerResult{}
+	for rows.Next() {
+		var result domain.RunnerResult
+		var itemsJSON, detailsJSON, createdAt string
+		if err := rows.Scan(&result.ID, &result.CollectionID, &result.EnvironmentID, &result.Name, &result.Iterations,
+			&result.Passed, &result.Failed, &result.DurationMs, &itemsJSON, &detailsJSON, &createdAt); err != nil {
+			return nil, err
+		}
+		if err := unmarshal(itemsJSON, &result.Items); err != nil {
+			return nil, err
+		}
+		if detailsJSON != "" {
+			if err := unmarshal(detailsJSON, &result.Details); err != nil {
+				return nil, err
+			}
+		}
+		result.CreatedAt = parseTime(createdAt)
+		results = append(results, result)
+	}
+	return results, rows.Err()
 }
 
 func (s *Store) listFolders(ctx context.Context, collectionID string) ([]domain.Folder, error) {

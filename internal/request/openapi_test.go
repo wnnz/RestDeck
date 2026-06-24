@@ -84,3 +84,55 @@ func TestExportOpenAPICollection(t *testing.T) {
 		t.Fatalf("/users path missing: %s", raw)
 	}
 }
+
+func TestImportOpenAPIYAMLWithServerAndPathParams(t *testing.T) {
+	raw := `
+openapi: 3.0.3
+info:
+  title: YAML API
+  version: 1.0.0
+servers:
+  - url: https://api.one.test
+  - url: https://api.two.test
+paths:
+  /users/{id}:
+    parameters:
+      - name: id
+        in: path
+        schema:
+          type: string
+          example: u-1
+    get:
+      summary: Get user
+      parameters:
+        - name: include
+          in: query
+          schema:
+            type: string
+            enum: [profile, roles]
+      responses:
+        "200":
+          description: OK
+`
+	info, err := InspectOpenAPI(raw)
+	if err != nil {
+		t.Fatalf("inspect yaml: %v", err)
+	}
+	if len(info.Servers) != 2 || info.Servers[1] != "https://api.two.test" {
+		t.Fatalf("servers = %#v", info.Servers)
+	}
+	collection, err := ImportOpenAPIWithOptions(raw, domain.OpenAPIImportOptions{ServerURL: info.Servers[1]})
+	if err != nil {
+		t.Fatalf("import yaml: %v", err)
+	}
+	if len(collection.Requests) != 1 {
+		t.Fatalf("requests = %d", len(collection.Requests))
+	}
+	req := collection.Requests[0]
+	if req.URL != "https://api.two.test/users/{{id}}" {
+		t.Fatalf("url = %q", req.URL)
+	}
+	if len(req.Params) != 2 {
+		t.Fatalf("params = %#v", req.Params)
+	}
+}

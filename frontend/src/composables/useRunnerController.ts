@@ -26,6 +26,7 @@ type UseRunnerControllerOptions = {
   sendRequest: (request: domain.Request, environmentId: string, globals: domain.KeyValue[]) => Promise<domain.Response>
   getState: () => Promise<domain.WorkspaceState>
   setState: (state: domain.WorkspaceState) => void
+  saveRunnerResult: (result: domain.RunnerResult) => Promise<domain.WorkspaceState>
 }
 
 export function useRunnerController(options: UseRunnerControllerOptions) {
@@ -37,6 +38,8 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
   const runnerQueue = ref<RunnerQueueItem[]>([])
   const runnerFailurePolicy = ref<RunnerFailurePolicy>('continue')
   const runnerStopRequested = ref(false)
+  const runnerRetryCount = ref(0)
+  const runnerDelayMs = ref(0)
 
   function ensureRunnerRequest(activeRequestId: string) {
     const collection = options.activeCollection.value
@@ -66,6 +69,16 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
 
   function setRunnerFailurePolicy(policy: RunnerFailurePolicy) {
     runnerFailurePolicy.value = policy === 'stopOnFailure' ? 'stopOnFailure' : 'continue'
+    resetRunnerOutput()
+  }
+
+  function setRunnerRetryCount(value: number) {
+    runnerRetryCount.value = Math.max(0, Math.floor(value || 0))
+    resetRunnerOutput()
+  }
+
+  function setRunnerDelayMs(value: number) {
+    runnerDelayMs.value = Math.max(0, Math.floor(value || 0))
     resetRunnerOutput()
   }
 
@@ -113,6 +126,7 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
         if (runnerStopRequested.value) break
       }
       runnerResult.value.durationMs = Date.now() - startedAt
+      await persistRunnerResult()
       options.statusMessage.value = runnerStatusMessage()
     } catch (error) {
       options.statusMessage.value = formatError(error)
@@ -137,6 +151,7 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
       })
       await runRunnerQueueRequest(request, 1)
       runnerResult.value.durationMs = Date.now() - startedAt
+      await persistRunnerResult()
       options.statusMessage.value = runnerStatusMessage()
     } catch (error) {
       options.statusMessage.value = formatError(error)
@@ -155,16 +170,33 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
       options.statusMessage.value = options.labels.value.sendingRequest
       const savedState = await options.saveRequest(requestToSend)
       options.setState(savedState)
-      const result = await options.sendRequest(requestToSend, options.activeEnvironment.value?.id ?? '', options.globalsDraft.value)
+      let result: domain.Response | null = null
+      let lastError: unknown = null
+      for (let attempt = 0; attempt <= runnerRetryCount.value; attempt++) {
+        try {
+          result = await options.sendRequest(requestToSend, options.activeEnvironment.value?.id ?? '', options.globalsDraft.value)
+          const summary = summarizeRunnerResponse(result, options.labels.value.tests)
+          if (summary.passed || attempt >= runnerRetryCount.value) break
+          updateRunnerQueueItem(queueId, { message: `${summary.message} · retry ${attempt + 1}/${runnerRetryCount.value}` })
+        } catch (error) {
+          lastError = error
+          if (attempt >= runnerRetryCount.value) throw error
+          updateRunnerQueueItem(queueId, { message: `${formatError(error)} · retry ${attempt + 1}/${runnerRetryCount.value}` })
+        }
+      }
+      if (!result) throw lastError ?? new Error('No response')
       const summary = summarizeRunnerResponse(result, options.labels.value.tests)
       updateRunnerQueueItem(queueId, {
         status: summary.passed ? 'passed' : 'failed',
         url: result.requestedUrl || requestToSend.url,
         statusCode: result.statusCode,
         durationMs: result.durationMs,
-        message: summary.message
+        message: summary.message,
+        request: result.request,
+        response: result,
+        testResults: result.testResults ?? []
       })
-      addRunnerResultItem(requestToSend, summary.passed, summary.message)
+      addRunnerResultItem(requestToSend, summary.passed, summary.message, result, iteration)
       try {
         const latestState = await options.getState()
         options.setState(latestState)
@@ -178,9 +210,10 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
         durationMs: Date.now() - startedAt,
         message
       })
-      addRunnerResultItem(requestToSend, false, message)
+      addRunnerResultItem(requestToSend, false, message, null, iteration)
       return false
     }
+    if (runnerDelayMs.value > 0) await delay(runnerDelayMs.value)
     return runnerQueue.value.find((item) => item.id === queueId)?.status === 'passed'
   }
 
@@ -191,7 +224,7 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
     })
   }
 
-  function addRunnerResultItem(request: domain.Request, passed: boolean, message: string) {
+  function addRunnerResultItem(request: domain.Request, passed: boolean, message: string, response: domain.Response | null, iteration: number) {
     if (!runnerResult.value) return
     runnerResult.value.passed += passed ? 1 : 0
     runnerResult.value.failed += passed ? 0 : 1
@@ -199,6 +232,36 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
       ...(runnerResult.value.items ?? []),
       new domain.TestResult({ name: request.name || request.url, passed, message })
     ]
+    runnerResult.value.details = [
+      ...(runnerResult.value.details ?? []),
+      new domain.RunnerRequestResult({
+        id: crypto.randomUUID(),
+        requestId: request.id,
+        iteration,
+        name: request.name || request.url,
+        method: request.method,
+        url: response?.requestedUrl || request.url,
+        status: passed ? 'passed' : 'failed',
+        statusCode: response?.statusCode ?? 0,
+        durationMs: response?.durationMs ?? 0,
+        message,
+        request: response?.request,
+        response: response ?? new domain.Response({ error: message }),
+        testResults: response?.testResults ?? [],
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString()
+      })
+    ]
+  }
+
+  async function persistRunnerResult() {
+    if (!runnerResult.value) return
+    try {
+      const next = await options.saveRunnerResult(runnerResult.value)
+      options.setState(next)
+    } catch (error) {
+      options.statusMessage.value = formatError(error)
+    }
   }
 
   function updateRunnerQueueItem(id: string, patch: Partial<RunnerQueueItem>) {
@@ -224,7 +287,51 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
     runnerQueue.value.forEach((item, index) => {
       lines.push(`| ${index + 1} | ${item.iteration} | ${item.method} | ${escapeCell(item.name)} | ${escapeCell(item.url)} | ${item.status} | ${item.statusCode ?? '-'} | ${item.durationMs != null ? `${item.durationMs} ms` : '-'} | ${escapeCell(item.message || '-')} |`)
     })
+    const details = result?.details ?? []
+    if (details.length) {
+      lines.push('', '## Details')
+      details.forEach((detail, index) => {
+        lines.push(
+          '',
+          `### ${index + 1}. ${detail.method} ${detail.name}`,
+          '',
+          `- Iteration: ${detail.iteration}`,
+          `- URL: ${detail.url}`,
+          `- Status: ${detail.status}`,
+          `- Code: ${detail.statusCode || '-'}`,
+          `- Duration: ${detail.durationMs} ms`,
+          `- Message: ${detail.message || '-'}`,
+          '',
+          '#### Request',
+          '',
+          `${detail.request?.method || detail.method} ${detail.request?.url || detail.url}`
+        )
+        if (detail.request?.headers?.length) {
+          lines.push('', '| Header | Value |', '| --- | --- |')
+          detail.request.headers.forEach((header) => {
+            lines.push(`| ${escapeCell(header.key)} | ${escapeCell(header.value)} |`)
+          })
+        }
+        if (detail.request?.body?.text) {
+          lines.push('', '```text', detail.request.body.text, '```')
+        }
+        lines.push('', '#### Response', '', detail.response?.status || detail.response?.error || '-')
+        if (detail.response?.body) {
+          lines.push('', '```text', detail.response.body, '```')
+        }
+        if (detail.testResults?.length) {
+          lines.push('', '#### Tests', '', '| Test | Result | Message |', '| --- | --- | --- |')
+          detail.testResults.forEach((test) => {
+            lines.push(`| ${escapeCell(test.name)} | ${test.passed ? 'passed' : 'failed'} | ${escapeCell(test.message || '-')} |`)
+          })
+        }
+      })
+    }
     return lines.join('\n')
+  }
+
+  function delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 
   function escapeCell(value: string) {
@@ -240,12 +347,16 @@ export function useRunnerController(options: UseRunnerControllerOptions) {
     runnerQueue,
     runnerFailurePolicy,
     runnerStopRequested,
+    runnerRetryCount,
+    runnerDelayMs,
     ensureRunnerRequest,
     setRunnerRequest,
     selectRunnerRequest,
     setRunnerScope,
     setRunnerIterations,
     setRunnerFailurePolicy,
+    setRunnerRetryCount,
+    setRunnerDelayMs,
     stopRunner,
     resetRunnerOutput,
     runActiveCollection,

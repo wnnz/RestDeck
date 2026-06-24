@@ -115,3 +115,20 @@ func TestResolverDetectsVariableCycles(t *testing.T) {
 		t.Fatal("expected cycle error")
 	}
 }
+
+func TestRequestVariableNamesScansRequestFields(t *testing.T) {
+	req := domain.Request{
+		URL:      "{{baseUrl}}/users/{{$guid}}",
+		Params:   []domain.KeyValue{{Enabled: true, Key: "page", Value: "{{page}}"}},
+		Headers:  []domain.KeyValue{{Enabled: true, Key: "Authorization", Value: "Bearer {{token}}"}},
+		Body:     `{"id":"{{userId}}"}`,
+		BodyMode: domain.BodyModeJSON,
+		Auth:     domain.AuthConfig{Values: map[string]string{"token": "{{token}}"}},
+	}
+	names := strings.Join(RequestVariableNames(req), ",")
+	for _, expected := range []string{"baseUrl", "$guid", "page", "token", "userId"} {
+		if !strings.Contains(names, expected) {
+			t.Fatalf("expected %s in %s", expected, names)
+		}
+	}
+}

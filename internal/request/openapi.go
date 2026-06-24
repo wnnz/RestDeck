@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 
 	"restdeck/internal/domain"
 )
@@ -35,9 +36,13 @@ type openAPIServer struct {
 }
 
 func ImportOpenAPI(raw string) (domain.Collection, error) {
+	return ImportOpenAPIWithOptions(raw, domain.OpenAPIImportOptions{})
+}
+
+func ImportOpenAPIWithOptions(raw string, options domain.OpenAPIImportOptions) (domain.Collection, error) {
 	var doc openAPIDoc
-	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
-		return domain.Collection{}, fmt.Errorf("OpenAPI JSON 解析失败: %w", err)
+	if err := decodeOpenAPI(raw, &doc); err != nil {
+		return domain.Collection{}, err
 	}
 	if len(doc.Paths) == 0 {
 		return domain.Collection{}, fmt.Errorf("OpenAPI paths 不能为空")
@@ -51,7 +56,9 @@ func ImportOpenAPI(raw string) (domain.Collection, error) {
 		UpdatedAt:   now,
 	}
 	baseURL := ""
-	if len(doc.Servers) > 0 {
+	if strings.TrimSpace(options.ServerURL) != "" {
+		baseURL = strings.TrimRight(strings.TrimSpace(options.ServerURL), "/")
+	} else if len(doc.Servers) > 0 {
 		baseURL = strings.TrimRight(doc.Servers[0].URL, "/")
 	}
 
@@ -63,14 +70,43 @@ func ImportOpenAPI(raw string) (domain.Collection, error) {
 	sortOrder := 0
 	for _, path := range paths {
 		pathItem := doc.Paths[path]
+		pathParameters := arrayOfMaps(pathItem["parameters"])
 		for _, method := range sortedOpenAPIMethods(pathItem) {
 			operation, _ := pathItem[method].(map[string]any)
-			request := importOpenAPIOperation(collection.ID, baseURL, path, method, operation, sortOrder)
+			request := importOpenAPIOperation(collection.ID, baseURL, path, method, operation, pathParameters, sortOrder)
 			collection.Requests = append(collection.Requests, request)
 			sortOrder++
 		}
 	}
 	return collection, nil
+}
+
+func InspectOpenAPI(raw string) (domain.OpenAPIInfo, error) {
+	var doc openAPIDoc
+	if err := decodeOpenAPI(raw, &doc); err != nil {
+		return domain.OpenAPIInfo{}, err
+	}
+	info := domain.OpenAPIInfo{
+		Title:       fallback(doc.Info.Title, "OpenAPI Collection"),
+		Description: doc.Info.Description,
+		Servers:     []string{},
+	}
+	for _, server := range doc.Servers {
+		if strings.TrimSpace(server.URL) != "" {
+			info.Servers = append(info.Servers, server.URL)
+		}
+	}
+	return info, nil
+}
+
+func decodeOpenAPI(raw string, doc *openAPIDoc) error {
+	if err := json.Unmarshal([]byte(raw), doc); err == nil && (doc.OpenAPI != "" || len(doc.Paths) > 0) {
+		return nil
+	}
+	if err := yaml.Unmarshal([]byte(raw), doc); err != nil {
+		return fmt.Errorf("OpenAPI 解析失败: %w", err)
+	}
+	return nil
 }
 
 func ExportOpenAPI(collection domain.Collection) (string, error) {
@@ -115,7 +151,7 @@ func sortedOpenAPIMethods(pathItem map[string]any) []string {
 	return methods
 }
 
-func importOpenAPIOperation(collectionID, baseURL, path, method string, operation map[string]any, sortOrder int) domain.Request {
+func importOpenAPIOperation(collectionID, baseURL, path, method string, operation map[string]any, pathParameters []map[string]any, sortOrder int) domain.Request {
 	name := stringValue(operation, "summary")
 	if name == "" {
 		name = stringValue(operation, "operationId")
@@ -128,7 +164,7 @@ func importOpenAPIOperation(collectionID, baseURL, path, method string, operatio
 		CollectionID: collectionID,
 		Name:         name,
 		Method:       strings.ToUpper(method),
-		URL:          baseURL + path,
+		URL:          baseURL + openAPIPathToTemplate(path),
 		Params:       []domain.KeyValue{},
 		Headers:      []domain.KeyValue{},
 		BodyMode:     domain.BodyModeNone,
@@ -138,7 +174,7 @@ func importOpenAPIOperation(collectionID, baseURL, path, method string, operatio
 		SortOrder:    sortOrder,
 		UpdatedAt:    time.Now(),
 	}
-	for _, parameter := range arrayOfMaps(operation["parameters"]) {
+	for _, parameter := range append(pathParameters, arrayOfMaps(operation["parameters"])...) {
 		target := stringValue(parameter, "in")
 		row := domain.KeyValue{
 			ID:          uuid.NewString(),
@@ -152,6 +188,11 @@ func importOpenAPIOperation(collectionID, baseURL, path, method string, operatio
 			request.Params = append(request.Params, row)
 		case "header":
 			request.Headers = append(request.Headers, row)
+		case "path":
+			if row.Value == "" {
+				row.Value = "{{" + row.Key + "}}"
+			}
+			request.Params = append(request.Params, row)
 		}
 	}
 	importOpenAPIRequestBody(&request, mapValue(operation, "requestBody"))
@@ -347,6 +388,29 @@ func exportOpenAPIPath(rawURL string) string {
 	return "/" + strings.TrimLeft(value, "/")
 }
 
+func openAPIPathToTemplate(path string) string {
+	var out strings.Builder
+	for index := 0; index < len(path); {
+		if path[index] == '{' {
+			end := strings.IndexByte(path[index+1:], '}')
+			if end >= 0 {
+				end += index + 1
+				name := strings.TrimSpace(path[index+1 : end])
+				if name != "" {
+					out.WriteString("{{")
+					out.WriteString(name)
+					out.WriteString("}}")
+					index = end + 1
+					continue
+				}
+			}
+		}
+		out.WriteByte(path[index])
+		index++
+	}
+	return out.String()
+}
+
 func arrayOfMaps(raw any) []map[string]any {
 	values, _ := raw.([]any)
 	out := []map[string]any{}
@@ -373,11 +437,19 @@ func sampleFromSchema(schema map[string]any) string {
 	if example, ok := schema["example"]; ok {
 		return fmt.Sprint(example)
 	}
+	if def, ok := schema["default"]; ok {
+		return fmt.Sprint(def)
+	}
+	if enumValues, ok := schema["enum"].([]any); ok && len(enumValues) > 0 {
+		return fmt.Sprint(enumValues[0])
+	}
 	switch stringValue(schema, "type") {
 	case "integer", "number":
 		return "0"
 	case "boolean":
 		return "true"
+	case "array", "object":
+		return jsonSampleString(sampleFromSchemaValue(schema))
 	default:
 		return ""
 	}
@@ -385,6 +457,15 @@ func sampleFromSchema(schema map[string]any) string {
 
 func sampleFromSchemaValue(schema any) any {
 	schemaMap, _ := schema.(map[string]any)
+	if example, ok := schemaMap["example"]; ok {
+		return example
+	}
+	if def, ok := schemaMap["default"]; ok {
+		return def
+	}
+	if enumValues, ok := schemaMap["enum"].([]any); ok && len(enumValues) > 0 {
+		return enumValues[0]
+	}
 	switch stringValue(schemaMap, "type") {
 	case "object":
 		out := map[string]any{}

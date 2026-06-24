@@ -1,8 +1,8 @@
 export type NavKey = 'collections' | 'environments' | 'history' | 'runner' | 'realtime' | 'settings'
-export type RequestTab = 'params' | 'auth' | 'headers' | 'body' | 'pre' | 'tests' | 'settings'
+export type RequestTab = 'params' | 'auth' | 'headers' | 'body' | 'pre' | 'tests' | 'preview' | 'variables' | 'settings'
 export type ResponseTab = 'body' | 'headers' | 'cookies' | 'tests'
 export type ResponseView = 'pretty' | 'raw' | 'preview'
-export type ActiveModal = 'postman' | 'fetch' | 'curl' | 'openapi' | 'export' | null
+export type ActiveModal = 'postman' | 'fetch' | 'curl' | 'openapi' | 'har' | 'export' | null
 export type Language = 'zh-CN' | 'en-US'
 export type Theme = 'light' | 'dark'
 export type ProxyMode = 'inherit' | 'none' | 'custom'
@@ -26,4 +26,7 @@ export type RunnerQueueItem = {
   statusCode?: number
   durationMs?: number
   message?: string
+  request?: import('../wailsjs/go/models').domain.PreparedRequest
+  response?: import('../wailsjs/go/models').domain.Response
+  testResults?: import('../wailsjs/go/models').domain.TestResult[]
 }

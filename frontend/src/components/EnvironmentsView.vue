@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Plus, Trash2 } from 'lucide-vue-next'
+import { CheckCircle2, Loader2, Plus, Trash2, Wand2, XCircle } from 'lucide-vue-next'
+import { reactive } from 'vue'
 import { domain } from '../../wailsjs/go/models'
 import type { Translation } from '../i18n/messages'
 import type { VariableSuggestion } from '../types'
@@ -14,6 +15,7 @@ const props = defineProps<{
   mode: 'environment' | 'globals'
   collections: domain.Collection[]
   variableSuggestions: VariableSuggestion[]
+  testJsonPath: (variable: domain.KeyValue) => Promise<string>
 }>()
 
 const envDraft = defineModel<{ id: string; name: string; variables: domain.KeyValue[] }>('envDraft', { required: true })
@@ -23,6 +25,32 @@ const emit = defineEmits<{
   addVariable: [target: domain.KeyValue[]]
   removeRow: [target: domain.KeyValue[], index: number]
 }>()
+
+const jsonPathTestState = reactive<Record<string, { busy: boolean; value: string; error: string }>>({})
+
+function stateKey(variable: domain.KeyValue) {
+  return variable.id || variable.key || 'jsonpath'
+}
+
+function testState(variable: domain.KeyValue) {
+  const key = stateKey(variable)
+  if (!jsonPathTestState[key]) jsonPathTestState[key] = { busy: false, value: '', error: '' }
+  return jsonPathTestState[key]
+}
+
+async function testJSONPathVariable(variable: domain.KeyValue) {
+  const state = testState(variable)
+  state.busy = true
+  state.value = ''
+  state.error = ''
+  try {
+    state.value = await props.testJsonPath(variable)
+  } catch (error) {
+    state.error = error instanceof Error ? error.message : String(error)
+  } finally {
+    state.busy = false
+  }
+}
 
 function requestOptions() {
   return (props.collections ?? []).flatMap((collection) => (collection.requests ?? []).map((request) => ({
@@ -86,6 +114,21 @@ function responseStrategyOptions() {
             <VoltSelect v-model="variable.responseStrategy" :options="responseStrategyOptions()" />
             <VoltInputText v-if="variable.responseStrategy === 'refreshAfter'" v-model="variable.refreshAfterSeconds" type="number" />
             <VariableSuggestInput v-model="variable.fallbackValue" :suggestions="variableSuggestions" :placeholder="t.fallbackValue" />
+            <VoltButton
+              class="response-var-test"
+              variant="secondary"
+              :disabled="testState(variable).busy || !variable.sourceRequestId || !variable.jsonPath"
+              @click="testJSONPathVariable(variable)"
+            >
+              <Loader2 v-if="testState(variable).busy" class="spin" :size="13" />
+              <Wand2 v-else :size="13" />
+              {{ t.testJsonPath }}
+            </VoltButton>
+            <div v-if="testState(variable).value || testState(variable).error" class="response-var-test-result">
+              <CheckCircle2 v-if="testState(variable).value" :size="14" class="text-emerald-600" />
+              <XCircle v-else :size="14" class="text-red-600" />
+              <code>{{ testState(variable).value || testState(variable).error }}</code>
+            </div>
           </div>
         </div>
         <VoltInputText v-model="variable.description" />

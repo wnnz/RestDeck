@@ -132,6 +132,76 @@ func (r *Resolver) ValuesWithError() (map[string]string, error) {
 	return out, nil
 }
 
+func (r *Resolver) ResolveVariableForDebug(name string) (string, error) {
+	if value, ok := r.dynamic(name); ok {
+		return value, nil
+	}
+	value, ok, err := r.resolveVariable(name)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "{{" + name + "}}", nil
+	}
+	return value, nil
+}
+
+func VariableNames(input string) []string {
+	if input == "" {
+		return nil
+	}
+	matches := variablePattern.FindAllStringSubmatch(input, -1)
+	out := []string{}
+	seen := map[string]bool{}
+	for _, match := range matches {
+		if len(match) != 2 {
+			continue
+		}
+		name := strings.TrimSpace(match[1])
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+func RequestVariableNames(req domain.Request) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	addText := func(value string) {
+		for _, name := range VariableNames(value) {
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		}
+	}
+	addText(req.URL)
+	addText(req.Body)
+	addText(req.PreScript)
+	addText(req.TestScript)
+	addText(req.Proxy.URL)
+	for _, kv := range req.Params {
+		addText(kv.Key)
+		addText(kv.Value)
+	}
+	for _, kv := range req.Headers {
+		addText(kv.Key)
+		addText(kv.Value)
+	}
+	for _, item := range req.FormItems {
+		addText(item.Key)
+		addText(item.Value)
+		addText(item.FilePath)
+	}
+	for _, value := range req.Auth.Values {
+		addText(value)
+	}
+	return out
+}
+
 func (r *Resolver) resolveVariable(name string) (string, bool, error) {
 	if value, ok := r.values[name]; ok {
 		if variablePattern.MatchString(value) {

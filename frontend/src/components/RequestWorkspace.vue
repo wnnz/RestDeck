@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { CheckCircle2, Clipboard, Clock3, Download, FileJson2, Loader2, Plus, Search, Send, Trash2, Variable, Wand2, XCircle } from 'lucide-vue-next'
+import { CheckCircle2, Clipboard, Clock3, Download, FileJson2, Loader2, Plus, RefreshCw, Search, Send, Trash2, Variable, Wand2, XCircle } from 'lucide-vue-next'
 import { domain } from '../../wailsjs/go/models'
 import VoltSelect from './volt/VoltSelect.vue'
 import JsonBodyEditor from './JsonBodyEditor.vue'
@@ -29,6 +29,10 @@ const props = defineProps<{
   authTypes: Array<{ value: string; label: string }>
   bodyModes: Array<{ value: string; label: string }>
   variableSuggestions: VariableSuggestion[]
+  requestPreview: domain.PreparedRequest | null
+  requestPreviewBusy: boolean
+  variableDebugReport: domain.VariableDebugReport | null
+  variableDebugBusy: boolean
   sendRequestAction: () => void | Promise<void>
 }>()
 
@@ -54,6 +58,8 @@ const emit = defineEmits<{
   'copy-response-value': [value: string]
   'save-response': []
   'create-response-variable': []
+  'refresh-request-preview': []
+  'refresh-variable-debug': []
 }>()
 
 const formEditorMode = ref<'table' | 'text'>('table')
@@ -355,7 +361,60 @@ function newFormItem() {
             <VariableSuggestInput v-model="activeRequest.testScript" as="textarea" :suggestions="variableSuggestions" :spellcheck="false" placeholder='pm.test("Status is 200", function () { expect(pm.response.code).to.equal(200); });' />
           </div>
 
-          <div v-else class="settings-sections">
+          <div v-else-if="activeRequestTab === 'preview'" class="debug-panel">
+            <div class="debug-toolbar">
+              <strong>{{ t.actualRequest }}</strong>
+              <VoltButton variant="secondary" :disabled="requestPreviewBusy" @click="emit('refresh-request-preview')">
+                <Loader2 v-if="requestPreviewBusy" class="spin" :size="14" />
+                <RefreshCw v-else :size="14" />
+                {{ t.refresh }}
+              </VoltButton>
+            </div>
+            <div v-if="requestPreview?.error" class="debug-error">{{ requestPreview.error }}</div>
+            <div v-if="requestPreview" class="debug-grid">
+              <span>{{ t.method }}</span><code>{{ requestPreview.method || '-' }}</code>
+              <span>{{ t.requestUrl }}</span><code>{{ requestPreview.url || '-' }}</code>
+              <span>{{ t.proxyMode }}</span><code>{{ requestPreview.proxyApplied ? `${requestPreview.proxy?.url || '-'} (${requestPreview.proxySource})` : (requestPreview.proxyExcluded ? t.proxyExcluded : t.proxyNone) }}</code>
+              <span>{{ t.body }}</span><code>{{ requestPreview.body?.contentType || requestPreview.body?.mode || '-' }} · {{ requestPreview.body?.sizeBytes ?? 0 }} bytes</code>
+            </div>
+            <div v-if="requestPreview?.headers?.length" class="debug-section">
+              <strong>{{ t.headers }}</strong>
+              <div class="kv-read" v-for="header in requestPreview.headers" :key="header.key"><span>{{ header.key }}</span><code>{{ header.value }}</code></div>
+            </div>
+            <div v-if="requestPreview?.cookies?.length" class="debug-section">
+              <strong>{{ t.cookies }}</strong>
+              <div class="kv-read" v-for="cookie in requestPreview.cookies" :key="`${cookie.domain}-${cookie.name}`"><span>{{ cookie.name }}</span><code>{{ cookie.value }}</code></div>
+            </div>
+            <div v-if="requestPreview?.body?.text" class="debug-section">
+              <strong>{{ t.body }}</strong>
+              <pre>{{ requestPreview.body.text }}</pre>
+            </div>
+            <div v-if="!requestPreview" class="empty-panel">{{ t.actualRequestEmpty }}</div>
+          </div>
+
+          <div v-else-if="activeRequestTab === 'variables'" class="debug-panel">
+            <div class="debug-toolbar">
+              <strong>{{ t.variableDebug }}</strong>
+              <VoltButton variant="secondary" :disabled="variableDebugBusy" @click="emit('refresh-variable-debug')">
+                <Loader2 v-if="variableDebugBusy" class="spin" :size="14" />
+                <RefreshCw v-else :size="14" />
+                {{ t.refresh }}
+              </VoltButton>
+            </div>
+            <div v-for="error in variableDebugReport?.errors ?? []" :key="error" class="debug-error">{{ error }}</div>
+            <div v-if="variableDebugReport?.variables?.length" class="kv-table variable-debug-table">
+              <div class="kv-head variable-debug-head"><span>{{ t.key }}</span><span>{{ t.type }}</span><span>{{ t.value }}</span><span>{{ t.result }}</span></div>
+              <div v-for="variable in variableDebugReport.variables" :key="`${variable.source}-${variable.name}`" class="kv-row variable-debug-row">
+                <code>{{ variable.name }}</code>
+                <span>{{ variable.type }}</span>
+                <code>{{ variable.raw || '-' }}</code>
+                <code :class="{ 'text-red-600': variable.error }">{{ variable.error || variable.value || '-' }}</code>
+              </div>
+            </div>
+            <div v-else class="empty-panel">{{ t.variableDebugEmpty }}</div>
+          </div>
+
+          <div v-else-if="activeRequestTab === 'settings'" class="settings-sections">
             <section class="settings-group">
               <div class="settings-group-title">{{ t.requestSettings }}</div>
               <div class="settings-fields">

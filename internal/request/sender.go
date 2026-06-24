@@ -105,20 +105,24 @@ func (s *Sender) SendWithVariables(ctx context.Context, req domain.Request, vari
 	return s.SendWithVariablesAndProxy(ctx, req, variables, domain.ProxyConfig{Mode: "none"})
 }
 
+func (s *Sender) PrepareRequest(ctx context.Context, req domain.Request, variables map[string]string, defaultProxy domain.ProxyConfig) (domain.PreparedRequest, error) {
+	resolver := NewResolver(domain.Environment{}, nil)
+	resolver.values = variables
+	_, prepared, _, err := s.buildPreparedRequest(ctx, req, resolver, defaultProxy)
+	return prepared, err
+}
+
 func (s *Sender) SendWithVariablesAndProxy(ctx context.Context, req domain.Request, variables map[string]string, defaultProxy domain.ProxyConfig) (domain.Response, error) {
 	resolver := NewResolver(domain.Environment{}, nil)
 	resolver.values = variables
-	httpReq, err := buildHTTPRequest(ctx, req, resolver)
+	httpReq, prepared, effectiveProxy, err := s.buildPreparedRequest(ctx, req, resolver, defaultProxy)
 	if err != nil {
-		return domain.Response{Error: err.Error()}, err
-	}
-	effectiveProxy, err := EffectiveProxyForURL(req.Proxy, defaultProxy, httpReq.URL.String())
-	if err != nil {
-		return domain.Response{Error: err.Error(), RequestedURL: httpReq.URL.String()}, err
+		return domain.Response{Error: err.Error(), RequestedURL: prepared.URL, Request: prepared}, err
 	}
 	transport, err := HTTPTransportForProxy(effectiveProxy)
 	if err != nil {
-		return domain.Response{Error: err.Error(), RequestedURL: httpReq.URL.String()}, err
+		prepared.Error = err.Error()
+		return domain.Response{Error: err.Error(), RequestedURL: prepared.URL, Request: prepared}, err
 	}
 	timeout := req.TimeoutMs
 	if timeout <= 0 {
@@ -141,13 +145,14 @@ func (s *Sender) SendWithVariablesAndProxy(ctx context.Context, req domain.Reque
 			DurationMs:   duration.Milliseconds(),
 			Error:        err.Error(),
 			RequestedURL: httpReq.URL.String(),
+			Request:      prepared,
 		}, err
 	}
 	defer httpRes.Body.Close()
 
 	body, readErr := io.ReadAll(io.LimitReader(httpRes.Body, 20*1024*1024))
 	if readErr != nil {
-		return domain.Response{Error: readErr.Error(), RequestedURL: httpReq.URL.String()}, readErr
+		return domain.Response{Error: readErr.Error(), RequestedURL: httpReq.URL.String(), Request: prepared}, readErr
 	}
 
 	headers := make([]domain.KeyValue, 0, len(httpRes.Header))
@@ -187,17 +192,49 @@ func (s *Sender) SendWithVariablesAndProxy(ctx context.Context, req domain.Reque
 		Body:         string(body),
 		ContentType:  httpRes.Header.Get("Content-Type"),
 		RequestedURL: httpReq.URL.String(),
+		Request:      prepared,
 	}, nil
 }
 
+func (s *Sender) buildPreparedRequest(ctx context.Context, req domain.Request, resolver *Resolver, defaultProxy domain.ProxyConfig) (*http.Request, domain.PreparedRequest, domain.ProxyConfig, error) {
+	httpReq, preparedBody, err := buildHTTPRequestWithPrepared(ctx, req, resolver)
+	prepared := domain.PreparedRequest{Body: preparedBody}
+	if err != nil {
+		prepared.Error = err.Error()
+		return nil, prepared, domain.ProxyConfig{Mode: "none"}, err
+	}
+	effectiveProxy, proxySource, proxyExcluded, err := ResolveProxyForURL(req.Proxy, defaultProxy, httpReq.URL.String())
+	prepared = domain.PreparedRequest{
+		Method:        httpReq.Method,
+		URL:           httpReq.URL.String(),
+		Headers:       headersFromRequest(httpReq),
+		Cookies:       s.CookiesForURL(httpReq.URL.String()),
+		Body:          preparedBody,
+		Proxy:         effectiveProxy,
+		ProxyApplied:  effectiveProxy.Mode == "custom",
+		ProxyExcluded: proxyExcluded,
+		ProxySource:   proxySource,
+	}
+	if err != nil {
+		prepared.Error = err.Error()
+		return httpReq, prepared, domain.ProxyConfig{Mode: "none"}, err
+	}
+	return httpReq, prepared, effectiveProxy, nil
+}
+
 func buildHTTPRequest(ctx context.Context, req domain.Request, resolver *Resolver) (*http.Request, error) {
+	httpReq, _, err := buildHTTPRequestWithPrepared(ctx, req, resolver)
+	return httpReq, err
+}
+
+func buildHTTPRequestWithPrepared(ctx context.Context, req domain.Request, resolver *Resolver) (*http.Request, domain.PreparedBody, error) {
 	rawURL := strings.TrimSpace(resolver.Resolve(req.URL))
 	if rawURL == "" {
-		return nil, fmt.Errorf("request URL is required")
+		return nil, domain.PreparedBody{}, fmt.Errorf("request URL is required")
 	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return nil, err
+		return nil, domain.PreparedBody{}, err
 	}
 	query := parsed.Query()
 	for _, param := range req.Params {
@@ -208,15 +245,18 @@ func buildHTTPRequest(ctx context.Context, req domain.Request, resolver *Resolve
 	parsed.RawQuery = query.Encode()
 
 	var body io.Reader
+	var bodyPreview domain.PreparedBody
 	multipartContentType := ""
 	switch req.BodyMode {
 	case domain.BodyModeJSON, domain.BodyModeRaw:
-		body = strings.NewReader(resolver.Resolve(req.Body))
+		bodyText := resolver.Resolve(req.Body)
+		body = strings.NewReader(bodyText)
+		bodyPreview = preparedTextBody(req.BodyMode, "", bodyText)
 	case domain.BodyModeForm:
 		var err error
-		body, multipartContentType, err = buildMultipartBody(req, resolver)
+		body, multipartContentType, bodyPreview, err = buildMultipartBody(req, resolver)
 		if err != nil {
-			return nil, err
+			return nil, bodyPreview, err
 		}
 	case domain.BodyModeURLEncoded:
 		values := url.Values{}
@@ -225,9 +265,12 @@ func buildHTTPRequest(ctx context.Context, req domain.Request, resolver *Resolve
 				values.Set(resolver.Resolve(row.Key), resolver.Resolve(row.Value))
 			}
 		}
-		body = strings.NewReader(values.Encode())
+		bodyText := values.Encode()
+		body = strings.NewReader(bodyText)
+		bodyPreview = preparedTextBody(req.BodyMode, "application/x-www-form-urlencoded", bodyText)
 	default:
 		body = nil
+		bodyPreview = domain.PreparedBody{Mode: req.BodyMode}
 	}
 
 	method := strings.ToUpper(strings.TrimSpace(req.Method))
@@ -236,7 +279,7 @@ func buildHTTPRequest(ctx context.Context, req domain.Request, resolver *Resolve
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, method, parsed.String(), body)
 	if err != nil {
-		return nil, err
+		return nil, bodyPreview, err
 	}
 
 	for _, header := range req.Headers {
@@ -254,12 +297,41 @@ func buildHTTPRequest(ctx context.Context, req domain.Request, resolver *Resolve
 		httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 	applyAuth(httpReq, req.Auth, resolver)
-	return httpReq, nil
+	bodyPreview.ContentType = httpReq.Header.Get("Content-Type")
+	return httpReq, bodyPreview, nil
 }
 
-func buildMultipartBody(req domain.Request, resolver *Resolver) (io.Reader, string, error) {
+func preparedTextBody(mode domain.BodyMode, contentType, text string) domain.PreparedBody {
+	const maxPreviewBytes = 64 * 1024
+	preview := text
+	truncated := false
+	if len(preview) > maxPreviewBytes {
+		preview = preview[:maxPreviewBytes]
+		truncated = true
+	}
+	return domain.PreparedBody{
+		Mode:        mode,
+		ContentType: contentType,
+		Text:        preview,
+		SizeBytes:   int64(len(text)),
+		Truncated:   truncated,
+	}
+}
+
+func headersFromRequest(req *http.Request) []domain.KeyValue {
+	headers := make([]domain.KeyValue, 0, len(req.Header))
+	for key, values := range req.Header {
+		headers = append(headers, domain.KeyValue{Enabled: true, Key: key, Value: strings.Join(values, ", ")})
+	}
+	sort.Slice(headers, func(i, j int) bool { return headers[i].Key < headers[j].Key })
+	return headers
+}
+
+func buildMultipartBody(req domain.Request, resolver *Resolver) (io.Reader, string, domain.PreparedBody, error) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
+	previewItems := []domain.FormItem{}
+	previewLines := []string{}
 	for _, item := range normalizeFormItems(req.FormItems, req.Body) {
 		if !item.Enabled || item.Key == "" {
 			continue
@@ -268,37 +340,57 @@ func buildMultipartBody(req domain.Request, resolver *Resolver) (io.Reader, stri
 		if key == "" {
 			continue
 		}
+		previewItem := item
+		previewItem.Key = key
 		if item.Type == "file" {
 			path := strings.TrimSpace(resolver.Resolve(item.FilePath))
 			if path == "" {
-				return nil, "", fmt.Errorf("form file path for %q is required", item.Key)
+				return nil, "", domain.PreparedBody{Mode: domain.BodyModeForm}, fmt.Errorf("form file path for %q is required", item.Key)
 			}
 			file, err := os.Open(path)
 			if err != nil {
-				return nil, "", fmt.Errorf("open form file %q: %w", path, err)
+				return nil, "", domain.PreparedBody{Mode: domain.BodyModeForm}, fmt.Errorf("open form file %q: %w", path, err)
 			}
+			info, statErr := file.Stat()
 			part, err := writer.CreateFormFile(key, filepath.Base(path))
 			if err != nil {
 				_ = file.Close()
-				return nil, "", err
+				return nil, "", domain.PreparedBody{Mode: domain.BodyModeForm}, err
 			}
 			if _, err := io.Copy(part, file); err != nil {
 				_ = file.Close()
-				return nil, "", err
+				return nil, "", domain.PreparedBody{Mode: domain.BodyModeForm}, err
 			}
 			if err := file.Close(); err != nil {
-				return nil, "", err
+				return nil, "", domain.PreparedBody{Mode: domain.BodyModeForm}, err
 			}
+			previewItem.FilePath = path
+			previewItem.Value = ""
+			sizeText := ""
+			if statErr == nil {
+				sizeText = fmt.Sprintf(", %d bytes", info.Size())
+			}
+			previewLines = append(previewLines, fmt.Sprintf("%s=@%s (%s%s)", key, path, filepath.Base(path), sizeText))
+			previewItems = append(previewItems, previewItem)
 			continue
 		}
-		if err := writer.WriteField(key, resolver.Resolve(item.Value)); err != nil {
-			return nil, "", err
+		value := resolver.Resolve(item.Value)
+		if err := writer.WriteField(key, value); err != nil {
+			return nil, "", domain.PreparedBody{Mode: domain.BodyModeForm}, err
 		}
+		previewItem.Value = value
+		previewItem.FilePath = ""
+		previewLines = append(previewLines, key+"="+value)
+		previewItems = append(previewItems, previewItem)
 	}
 	if err := writer.Close(); err != nil {
-		return nil, "", err
+		return nil, "", domain.PreparedBody{Mode: domain.BodyModeForm}, err
 	}
-	return &buf, writer.FormDataContentType(), nil
+	contentType := writer.FormDataContentType()
+	preview := preparedTextBody(domain.BodyModeForm, contentType, strings.Join(previewLines, "\n"))
+	preview.FormItems = previewItems
+	preview.SizeBytes = int64(buf.Len())
+	return &buf, contentType, preview, nil
 }
 
 func normalizeFormItems(items []domain.FormItem, fallbackBody string) []domain.FormItem {

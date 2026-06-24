@@ -24,6 +24,8 @@ type postmanItem struct {
 	Name    string          `json:"name"`
 	Item    []postmanItem   `json:"item,omitempty"`
 	Request *postmanRequest `json:"request,omitempty"`
+	Auth    *postmanAuth    `json:"auth,omitempty"`
+	Event   []postmanEvent  `json:"event,omitempty"`
 }
 
 type postmanRequest struct {
@@ -33,6 +35,14 @@ type postmanRequest struct {
 	Body   *postmanBody    `json:"body,omitempty"`
 	Auth   *postmanAuth    `json:"auth,omitempty"`
 	Event  []postmanEvent  `json:"event,omitempty"`
+}
+
+type postmanURL struct {
+	Raw      string      `json:"raw"`
+	Protocol string      `json:"protocol"`
+	Host     []string    `json:"host"`
+	Path     []string    `json:"path"`
+	Query    []postmanKV `json:"query"`
 }
 
 type postmanKV struct {
@@ -81,7 +91,7 @@ func ImportPostman(raw string) (domain.Collection, error) {
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	walkPostmanItems(&c, "", pc.Item)
+	walkPostmanItems(&c, "", pc.Item, nil, nil)
 	return c, nil
 }
 
@@ -98,8 +108,14 @@ func ExportPostman(collection domain.Collection) (string, error) {
 	return string(data), nil
 }
 
-func walkPostmanItems(c *domain.Collection, parentID string, items []postmanItem) {
+func walkPostmanItems(c *domain.Collection, parentID string, items []postmanItem, inheritedAuth *postmanAuth, inheritedEvents []postmanEvent) {
 	for index, item := range items {
+		itemAuth := inheritedAuth
+		if item.Auth != nil {
+			itemAuth = item.Auth
+		}
+		itemEvents := append([]postmanEvent{}, inheritedEvents...)
+		itemEvents = append(itemEvents, item.Event...)
 		if item.Request == nil {
 			folderID := uuid.NewString()
 			c.Folders = append(c.Folders, domain.Folder{
@@ -110,9 +126,15 @@ func walkPostmanItems(c *domain.Collection, parentID string, items []postmanItem
 				SortOrder:    index,
 				UpdatedAt:    time.Now(),
 			})
-			walkPostmanItems(c, folderID, item.Item)
+			walkPostmanItems(c, folderID, item.Item, itemAuth, itemEvents)
 			continue
 		}
+		reqAuth := itemAuth
+		if item.Request.Auth != nil {
+			reqAuth = item.Request.Auth
+		}
+		reqEvents := append([]postmanEvent{}, itemEvents...)
+		reqEvents = append(reqEvents, item.Request.Event...)
 		req := domain.Request{
 			ID:           uuid.NewString(),
 			CollectionID: c.ID,
@@ -120,9 +142,10 @@ func walkPostmanItems(c *domain.Collection, parentID string, items []postmanItem
 			Name:         fallback(item.Name, "Request"),
 			Method:       fallback(item.Request.Method, "GET"),
 			URL:          parsePostmanURL(item.Request.URL),
+			Params:       importKV(parsePostmanURLQuery(item.Request.URL)),
 			Headers:      importKV(item.Request.Header),
 			BodyMode:     domain.BodyModeNone,
-			Auth:         importAuth(item.Request.Auth),
+			Auth:         importAuth(reqAuth),
 			TimeoutMs:    30000,
 			SortOrder:    index,
 			UpdatedAt:    time.Now(),
@@ -130,7 +153,7 @@ func walkPostmanItems(c *domain.Collection, parentID string, items []postmanItem
 		if item.Request.Body != nil {
 			req.BodyMode, req.Body, req.FormItems = importBody(*item.Request.Body)
 		}
-		for _, event := range item.Request.Event {
+		for _, event := range reqEvents {
 			script := strings.Join(event.Script.Exec, "\n")
 			switch event.Listen {
 			case "prerequest":
@@ -148,13 +171,7 @@ func parsePostmanURL(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &asString); err == nil {
 		return asString
 	}
-	var obj struct {
-		Raw      string      `json:"raw"`
-		Protocol string      `json:"protocol"`
-		Host     []string    `json:"host"`
-		Path     []string    `json:"path"`
-		Query    []postmanKV `json:"query"`
-	}
+	var obj postmanURL
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return ""
 	}
@@ -170,6 +187,14 @@ func parsePostmanURL(raw json.RawMessage) string {
 		url += "/" + strings.Join(obj.Path, "/")
 	}
 	return url
+}
+
+func parsePostmanURLQuery(raw json.RawMessage) []postmanKV {
+	var obj postmanURL
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil
+	}
+	return obj.Query
 }
 
 func importKV(items []postmanKV) []domain.KeyValue {

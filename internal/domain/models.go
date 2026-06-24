@@ -119,18 +119,42 @@ type Cookie struct {
 	Secure   bool      `json:"secure"`
 }
 
+type PreparedBody struct {
+	Mode        BodyMode   `json:"mode"`
+	ContentType string     `json:"contentType"`
+	Text        string     `json:"text"`
+	FormItems   []FormItem `json:"formItems"`
+	SizeBytes   int64      `json:"sizeBytes"`
+	Truncated   bool       `json:"truncated"`
+}
+
+type PreparedRequest struct {
+	Method         string       `json:"method"`
+	URL            string       `json:"url"`
+	Headers        []KeyValue   `json:"headers"`
+	Cookies        []Cookie     `json:"cookies"`
+	Body           PreparedBody `json:"body"`
+	Proxy          ProxyConfig  `json:"proxy"`
+	ProxyApplied   bool         `json:"proxyApplied"`
+	ProxyExcluded  bool         `json:"proxyExcluded"`
+	ProxySource    string       `json:"proxySource"`
+	VariableErrors []string     `json:"variableErrors"`
+	Error          string       `json:"error"`
+}
+
 type Response struct {
-	StatusCode   int          `json:"statusCode"`
-	Status       string       `json:"status"`
-	DurationMs   int64        `json:"durationMs"`
-	SizeBytes    int64        `json:"sizeBytes"`
-	Headers      []KeyValue   `json:"headers"`
-	Cookies      []Cookie     `json:"cookies"`
-	Body         string       `json:"body"`
-	ContentType  string       `json:"contentType"`
-	TestResults  []TestResult `json:"testResults"`
-	Error        string       `json:"error"`
-	RequestedURL string       `json:"requestedUrl"`
+	StatusCode   int             `json:"statusCode"`
+	Status       string          `json:"status"`
+	DurationMs   int64           `json:"durationMs"`
+	SizeBytes    int64           `json:"sizeBytes"`
+	Headers      []KeyValue      `json:"headers"`
+	Cookies      []Cookie        `json:"cookies"`
+	Body         string          `json:"body"`
+	ContentType  string          `json:"contentType"`
+	TestResults  []TestResult    `json:"testResults"`
+	Error        string          `json:"error"`
+	RequestedURL string          `json:"requestedUrl"`
+	Request      PreparedRequest `json:"request"`
 }
 
 type TestResult struct {
@@ -153,26 +177,71 @@ type HistoryItem struct {
 }
 
 type RunnerResult struct {
-	ID            string       `json:"id"`
-	CollectionID  string       `json:"collectionId"`
-	EnvironmentID string       `json:"environmentId"`
-	Name          string       `json:"name"`
-	Iterations    int          `json:"iterations"`
-	Passed        int          `json:"passed"`
-	Failed        int          `json:"failed"`
-	DurationMs    int64        `json:"durationMs"`
-	Items         []TestResult `json:"items"`
-	CreatedAt     time.Time    `json:"createdAt"`
+	ID            string                `json:"id"`
+	CollectionID  string                `json:"collectionId"`
+	EnvironmentID string                `json:"environmentId"`
+	Name          string                `json:"name"`
+	Iterations    int                   `json:"iterations"`
+	Passed        int                   `json:"passed"`
+	Failed        int                   `json:"failed"`
+	DurationMs    int64                 `json:"durationMs"`
+	Items         []TestResult          `json:"items"`
+	Details       []RunnerRequestResult `json:"details"`
+	CreatedAt     time.Time             `json:"createdAt"`
+}
+
+type RunnerRequestResult struct {
+	ID          string          `json:"id"`
+	RequestID   string          `json:"requestId"`
+	Iteration   int             `json:"iteration"`
+	Name        string          `json:"name"`
+	Method      string          `json:"method"`
+	URL         string          `json:"url"`
+	Status      string          `json:"status"`
+	StatusCode  int             `json:"statusCode"`
+	DurationMs  int64           `json:"durationMs"`
+	Message     string          `json:"message"`
+	Request     PreparedRequest `json:"request"`
+	Response    Response        `json:"response"`
+	TestResults []TestResult    `json:"testResults"`
+	StartedAt   time.Time       `json:"startedAt"`
+	FinishedAt  time.Time       `json:"finishedAt"`
+}
+
+type VariableDebugItem struct {
+	Name     string `json:"name"`
+	Source   string `json:"source"`
+	Type     string `json:"type"`
+	Raw      string `json:"raw"`
+	Value    string `json:"value"`
+	Resolved bool   `json:"resolved"`
+	Error    string `json:"error"`
+}
+
+type VariableDebugReport struct {
+	Variables []VariableDebugItem `json:"variables"`
+	Errors    []string            `json:"errors"`
+}
+
+type OpenAPIImportOptions struct {
+	ServerURL string `json:"serverUrl"`
+}
+
+type OpenAPIInfo struct {
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Servers     []string `json:"servers"`
 }
 
 type WorkspaceState struct {
-	Collections         []Collection  `json:"collections"`
-	Environments        []Environment `json:"environments"`
-	History             []HistoryItem `json:"history"`
-	Globals             []KeyValue    `json:"globals"`
-	Cookies             []Cookie      `json:"cookies"`
-	ActiveEnvironmentID string        `json:"activeEnvironmentId"`
-	Settings            Settings      `json:"settings"`
+	Collections         []Collection   `json:"collections"`
+	Environments        []Environment  `json:"environments"`
+	History             []HistoryItem  `json:"history"`
+	RunnerHistory       []RunnerResult `json:"runnerHistory"`
+	Globals             []KeyValue     `json:"globals"`
+	Cookies             []Cookie       `json:"cookies"`
+	ActiveEnvironmentID string         `json:"activeEnvironmentId"`
+	Settings            Settings       `json:"settings"`
 }
 
 type Settings struct {

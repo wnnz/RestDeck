@@ -150,3 +150,48 @@ func TestSenderSendsLegacyFormBodyAsMultipart(t *testing.T) {
 		t.Fatalf("status = %d", res.StatusCode)
 	}
 }
+
+func TestSenderPreparesResolvedRequestPreview(t *testing.T) {
+	sender := NewSender()
+	sender.LoadCookies([]domain.Cookie{{Name: "sid", Value: "abc", Domain: "api.example.com", Path: "/", Secure: true}})
+	req := domain.Request{
+		Method:   "POST",
+		URL:      "https://api.example.com/users/{{id}}",
+		Params:   []domain.KeyValue{{Enabled: true, Key: "trace", Value: "{{trace}}"}},
+		Headers:  []domain.KeyValue{{Enabled: true, Key: "X-Token", Value: "{{token}}"}},
+		BodyMode: domain.BodyModeJSON,
+		Body:     `{"name":"{{name}}"}`,
+		Auth:     domain.AuthConfig{Type: domain.AuthTypeBearer, Values: map[string]string{"token": "{{token}}"}},
+		Proxy:    domain.ProxyConfig{Mode: "inherit"},
+	}
+	variables := map[string]string{"id": "u-1", "trace": "t-1", "token": "secret", "name": "Ada"}
+
+	preview, err := sender.PrepareRequest(t.Context(), req, variables, domain.ProxyConfig{Mode: "custom", URL: "http://127.0.0.1:7890", NoProxy: "localhost"})
+	if err != nil {
+		t.Fatalf("prepare request: %v", err)
+	}
+	if preview.URL != "https://api.example.com/users/u-1?trace=t-1" {
+		t.Fatalf("url = %q", preview.URL)
+	}
+	if !preview.ProxyApplied || preview.ProxySource != "default" {
+		t.Fatalf("proxy preview = %#v", preview)
+	}
+	if preview.Body.Text != `{"name":"Ada"}` {
+		t.Fatalf("body preview = %q", preview.Body.Text)
+	}
+	if len(preview.Cookies) != 1 || preview.Cookies[0].Name != "sid" {
+		t.Fatalf("cookies = %#v", preview.Cookies)
+	}
+	if !hasHeader(preview.Headers, "Authorization", "Bearer secret") || !hasHeader(preview.Headers, "X-Token", "secret") {
+		t.Fatalf("headers = %#v", preview.Headers)
+	}
+}
+
+func hasHeader(headers []domain.KeyValue, key, value string) bool {
+	for _, header := range headers {
+		if header.Key == key && header.Value == value {
+			return true
+		}
+	}
+	return false
+}

@@ -237,6 +237,88 @@ func (a *App) SendRequest(r domain.Request, environmentID string, globals []doma
 	return response, nil
 }
 
+func (a *App) PreviewRequest(r domain.Request, environmentID string, globals []domain.KeyValue) (domain.PreparedRequest, error) {
+	state, err := a.store.State(a.ctx)
+	if err != nil {
+		return domain.PreparedRequest{}, err
+	}
+	env := findEnvironment(state.Environments, environmentID)
+	r = a.prepareSecrets(r, false)
+	env = a.prepareEnvironmentSecrets(env, false)
+	a.sender.LoadCookies(state.Cookies)
+	resolver := a.newResolver(env, globals, state.Settings.DefaultProxy)
+	variables, err := resolver.ValuesWithError()
+	if err != nil {
+		return domain.PreparedRequest{VariableErrors: []string{err.Error()}, Error: err.Error()}, nil
+	}
+	preview, err := a.sender.PrepareRequest(a.ctx, r, variables, state.Settings.DefaultProxy)
+	if err != nil {
+		return preview, nil
+	}
+	return preview, nil
+}
+
+func (a *App) DebugVariables(environmentID string, globals []domain.KeyValue) (domain.VariableDebugReport, error) {
+	state, err := a.store.State(a.ctx)
+	if err != nil {
+		return domain.VariableDebugReport{}, err
+	}
+	env := findEnvironment(state.Environments, environmentID)
+	env = a.prepareEnvironmentSecrets(env, false)
+	report := domain.VariableDebugReport{}
+	addVariablesToDebugReport(&report, "global", globals, a.newResolver(env, globals, state.Settings.DefaultProxy))
+	addVariablesToDebugReport(&report, "environment", env.Variables, a.newResolver(env, globals, state.Settings.DefaultProxy))
+	return report, nil
+}
+
+func (a *App) DebugRequestVariables(r domain.Request, environmentID string, globals []domain.KeyValue) (domain.VariableDebugReport, error) {
+	state, err := a.store.State(a.ctx)
+	if err != nil {
+		return domain.VariableDebugReport{}, err
+	}
+	env := findEnvironment(state.Environments, environmentID)
+	env = a.prepareEnvironmentSecrets(env, false)
+	resolver := a.newResolver(env, globals, state.Settings.DefaultProxy)
+	report := domain.VariableDebugReport{}
+	for _, name := range reqsvc.RequestVariableNames(r) {
+		item := domain.VariableDebugItem{Name: name, Source: "request", Type: "reference", Raw: "{{" + name + "}}"}
+		value, err := resolver.ResolveVariableForDebug(name)
+		if err != nil {
+			item.Error = err.Error()
+			report.Errors = append(report.Errors, fmt.Sprintf("%s: %s", name, err.Error()))
+		} else {
+			item.Value = value
+			item.Resolved = true
+		}
+		report.Variables = append(report.Variables, item)
+	}
+	addVariablesToDebugReport(&report, "global", globals, resolver)
+	addVariablesToDebugReport(&report, "environment", env.Variables, resolver)
+	return report, nil
+}
+
+func (a *App) TestVariable(variable domain.KeyValue, environmentID string, globals []domain.KeyValue) (string, error) {
+	state, err := a.store.State(a.ctx)
+	if err != nil {
+		return "", err
+	}
+	env := findEnvironment(state.Environments, environmentID)
+	env = a.prepareEnvironmentSecrets(env, false)
+	variable.Enabled = true
+	if strings.TrimSpace(variable.Key) == "" {
+		variable.Key = "__preview"
+	}
+	env.Variables = append(env.Variables, variable)
+	return a.newResolver(env, globals, state.Settings.DefaultProxy).ResolveVariableForDebug(variable.Key)
+}
+
+func (a *App) SaveRunnerResult(result domain.RunnerResult) (domain.WorkspaceState, error) {
+	if err := a.store.AddRunnerResult(a.ctx, result); err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	return a.GetState()
+}
+
 func (a *App) ImportPostmanCollection(raw string) (domain.WorkspaceState, error) {
 	collection, err := reqsvc.ImportPostman(raw)
 	if err != nil {
@@ -259,7 +341,11 @@ func (a *App) ImportPostmanCollection(raw string) (domain.WorkspaceState, error)
 }
 
 func (a *App) ImportOpenAPICollection(raw string) (domain.WorkspaceState, error) {
-	collection, err := reqsvc.ImportOpenAPI(raw)
+	return a.ImportOpenAPICollectionWithOptions(raw, domain.OpenAPIImportOptions{})
+}
+
+func (a *App) ImportOpenAPICollectionWithOptions(raw string, options domain.OpenAPIImportOptions) (domain.WorkspaceState, error) {
+	collection, err := reqsvc.ImportOpenAPIWithOptions(raw, options)
 	if err != nil {
 		return domain.WorkspaceState{}, err
 	}
@@ -272,6 +358,10 @@ func (a *App) ImportOpenAPICollection(raw string) (domain.WorkspaceState, error)
 		}
 	}
 	return a.GetState()
+}
+
+func (a *App) InspectOpenAPI(raw string) (domain.OpenAPIInfo, error) {
+	return reqsvc.InspectOpenAPI(raw)
 }
 
 func (a *App) ImportFetchRequest(rawFetch, collectionID string) (domain.WorkspaceState, error) {
@@ -330,6 +420,35 @@ func (a *App) ExportOpenAPICollection(collectionID string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("collection %s not found", collectionID)
+}
+
+func (a *App) ExportHARCollection(collectionID string) (string, error) {
+	state, err := a.store.State(a.ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, c := range state.Collections {
+		if c.ID == collectionID {
+			return reqsvc.ExportHAR(c)
+		}
+	}
+	return "", fmt.Errorf("collection %s not found", collectionID)
+}
+
+func (a *App) ImportHARCollection(raw string) (domain.WorkspaceState, error) {
+	collection, err := reqsvc.ImportHAR(raw)
+	if err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	if err := a.store.SaveCollection(a.ctx, collection); err != nil {
+		return domain.WorkspaceState{}, err
+	}
+	for _, request := range collection.Requests {
+		if err := a.store.SaveRequest(a.ctx, request); err != nil {
+			return domain.WorkspaceState{}, err
+		}
+	}
+	return a.GetState()
 }
 
 func (a *App) ExportPostmanRequest(r domain.Request, collectionName string) (string, error) {
@@ -462,6 +581,29 @@ func (a *App) newResolver(env domain.Environment, globals []domain.KeyValue, def
 			return a.refreshResponseVariable(ctx, requestID, variables, defaultProxy)
 		},
 	})
+}
+
+func addVariablesToDebugReport(report *domain.VariableDebugReport, source string, variables []domain.KeyValue, resolver *reqsvc.Resolver) {
+	for _, kv := range variables {
+		if !kv.Enabled || strings.TrimSpace(kv.Key) == "" {
+			continue
+		}
+		item := domain.VariableDebugItem{
+			Name:   kv.Key,
+			Source: source,
+			Type:   fallback(kv.ValueType, "static"),
+			Raw:    kv.Value,
+		}
+		value, err := resolver.ResolveVariableForDebug(kv.Key)
+		if err != nil {
+			item.Error = err.Error()
+			report.Errors = append(report.Errors, fmt.Sprintf("%s: %s", kv.Key, err.Error()))
+		} else {
+			item.Value = value
+			item.Resolved = true
+		}
+		report.Variables = append(report.Variables, item)
+	}
 }
 
 func (a *App) refreshResponseVariable(ctx context.Context, requestID string, variables map[string]string, defaultProxy domain.ProxyConfig) (domain.HistoryItem, error) {

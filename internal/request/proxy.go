@@ -19,31 +19,38 @@ func EffectiveProxy(requestProxy, defaultProxy domain.ProxyConfig) (domain.Proxy
 }
 
 func EffectiveProxyForURL(requestProxy, defaultProxy domain.ProxyConfig, rawURL string) (domain.ProxyConfig, error) {
+	effective, _, _, err := ResolveProxyForURL(requestProxy, defaultProxy, rawURL)
+	return effective, err
+}
+
+func ResolveProxyForURL(requestProxy, defaultProxy domain.ProxyConfig, rawURL string) (domain.ProxyConfig, string, bool, error) {
 	requestProxy = normalizeProxy(requestProxy, "inherit")
 	requestProxy.NoProxy = ""
 	defaultProxy = normalizeProxy(defaultProxy, "none")
 	effective := requestProxy
+	source := "request"
 	if effective.Mode == "inherit" {
 		effective = defaultProxy
+		source = "default"
 	}
 	if effective.Mode != "custom" {
-		return domain.ProxyConfig{Mode: "none"}, nil
+		return domain.ProxyConfig{Mode: "none"}, source, false, nil
 	}
 	if proxyExcluded(rawURL, effective.NoProxy) {
-		return domain.ProxyConfig{Mode: "none"}, nil
+		return domain.ProxyConfig{Mode: "none"}, source, true, nil
 	}
 	if effective.URL == "" {
-		return domain.ProxyConfig{}, fmt.Errorf("proxy URL is required")
+		return domain.ProxyConfig{}, source, false, fmt.Errorf("proxy URL is required")
 	}
 	parsed, err := url.Parse(effective.URL)
 	if err != nil {
-		return domain.ProxyConfig{}, err
+		return domain.ProxyConfig{}, source, false, err
 	}
 	switch strings.ToLower(parsed.Scheme) {
 	case "http", "https", "socks5":
-		return domain.ProxyConfig{Mode: "custom", URL: effective.URL, NoProxy: effective.NoProxy}, nil
+		return domain.ProxyConfig{Mode: "custom", URL: effective.URL, NoProxy: effective.NoProxy}, source, false, nil
 	default:
-		return domain.ProxyConfig{}, fmt.Errorf("unsupported proxy scheme %q", parsed.Scheme)
+		return domain.ProxyConfig{}, source, false, fmt.Errorf("unsupported proxy scheme %q", parsed.Scheme)
 	}
 }
 

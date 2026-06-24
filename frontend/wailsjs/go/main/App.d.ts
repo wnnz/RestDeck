@@ -11,6 +11,10 @@ export function CreateEnvironment(arg1:string):Promise<domain.WorkspaceState>;
 
 export function CreateResponseVariable(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<domain.WorkspaceState>;
 
+export function DebugRequestVariables(arg1:domain.Request,arg2:string,arg3:Array<domain.KeyValue>):Promise<domain.VariableDebugReport>;
+
+export function DebugVariables(arg1:string,arg2:Array<domain.KeyValue>):Promise<domain.VariableDebugReport>;
+
 export function DeleteCollection(arg1:string):Promise<domain.WorkspaceState>;
 
 export function DeleteCookie(arg1:domain.Cookie):Promise<domain.WorkspaceState>;
@@ -18,6 +22,8 @@ export function DeleteCookie(arg1:domain.Cookie):Promise<domain.WorkspaceState>;
 export function DeleteEnvironment(arg1:string):Promise<domain.WorkspaceState>;
 
 export function DeleteRequest(arg1:string):Promise<domain.WorkspaceState>;
+
+export function ExportHARCollection(arg1:string):Promise<string>;
 
 export function ExportOpenAPICollection(arg1:string):Promise<string>;
 
@@ -33,9 +39,17 @@ export function ImportCurlRequest(arg1:string,arg2:string):Promise<domain.Worksp
 
 export function ImportFetchRequest(arg1:string,arg2:string):Promise<domain.WorkspaceState>;
 
+export function ImportHARCollection(arg1:string):Promise<domain.WorkspaceState>;
+
 export function ImportOpenAPICollection(arg1:string):Promise<domain.WorkspaceState>;
 
+export function ImportOpenAPICollectionWithOptions(arg1:string,arg2:domain.OpenAPIImportOptions):Promise<domain.WorkspaceState>;
+
 export function ImportPostmanCollection(arg1:string):Promise<domain.WorkspaceState>;
+
+export function InspectOpenAPI(arg1:string):Promise<domain.OpenAPIInfo>;
+
+export function PreviewRequest(arg1:domain.Request,arg2:string,arg3:Array<domain.KeyValue>):Promise<domain.PreparedRequest>;
 
 export function QueryJSONPath(arg1:string,arg2:string):Promise<string>;
 
@@ -49,6 +63,8 @@ export function SaveGlobals(arg1:Array<domain.KeyValue>):Promise<domain.Workspac
 
 export function SaveRequest(arg1:domain.Request):Promise<domain.WorkspaceState>;
 
+export function SaveRunnerResult(arg1:domain.RunnerResult):Promise<domain.WorkspaceState>;
+
 export function SaveSettings(arg1:domain.Settings):Promise<domain.WorkspaceState>;
 
 export function SaveTextFile(arg1:string,arg2:string,arg3:string):Promise<string>;
@@ -60,5 +76,7 @@ export function SendRequest(arg1:domain.Request,arg2:string,arg3:Array<domain.Ke
 export function SetActiveEnvironment(arg1:string):Promise<domain.WorkspaceState>;
 
 export function TestSSE(arg1:realtime.SSERequest,arg2:string,arg3:Array<domain.KeyValue>):Promise<realtime.SSEResult>;
+
+export function TestVariable(arg1:domain.KeyValue,arg2:string,arg3:Array<domain.KeyValue>):Promise<string>;
 
 export function TestWebSocket(arg1:realtime.WebSocketRequest,arg2:string,arg3:Array<domain.KeyValue>):Promise<realtime.WebSocketResult>;

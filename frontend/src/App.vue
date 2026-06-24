@@ -13,10 +13,13 @@ import {
   CreateCollection,
   CreateResponseVariable,
   CreateEnvironment,
+  DebugVariables,
+  DebugRequestVariables,
   DeleteCollection,
   DeleteCookie,
   DeleteEnvironment,
   DeleteRequest,
+  ExportHARCollection,
   ExportOpenAPICollection,
   ExportPostmanCollection,
   ExportPostmanRequest,
@@ -24,9 +27,14 @@ import {
   GetState,
   ImportCurlRequest,
   ImportFetchRequest,
+  ImportHARCollection,
   ImportOpenAPICollection,
+  ImportOpenAPICollectionWithOptions,
   ImportPostmanCollection,
+  InspectOpenAPI,
+  PreviewRequest,
   QueryJSONPath,
+  SaveRunnerResult,
   SaveCollection,
   SaveEnvironment,
   SaveGlobals,
@@ -36,6 +44,7 @@ import {
   SelectFile,
   SendRequest,
   SetActiveEnvironment,
+  TestVariable,
   TestSSE,
   TestWebSocket
 } from '../wailsjs/go/main/App'
@@ -89,6 +98,7 @@ const statusMessage = ref('')
 const activeModal = ref<ActiveModal>(null)
 const postmanText = ref('')
 const openAPIText = ref('')
+const harText = ref('')
 const fetchText = ref('')
 const curlText = ref('')
 const collectionPickerOpen = ref(false)
@@ -102,6 +112,12 @@ const responseSearch = ref('')
 const responseJSONPath = ref('$.')
 const responseJSONPathResult = ref('')
 const responseVariableKey = ref('')
+const requestPreview = ref<domain.PreparedRequest | null>(null)
+const requestPreviewBusy = ref(false)
+const variableDebugReport = ref<domain.VariableDebugReport | null>(null)
+const variableDebugBusy = ref(false)
+const openAPIServers = ref<string[]>([])
+const selectedOpenAPIServer = ref('')
 const wsDraft = reactive({
   url: 'wss://echo.websocket.events',
   message: '{ "hello": "restdeck" }',
@@ -139,6 +155,7 @@ let requestAutosavePromise: Promise<void> | null = null
 let environmentAutosavePromise: Promise<void> | null = null
 let globalsAutosavePromise: Promise<void> | null = null
 let settingsAutosavePromise: Promise<void> | null = null
+let openAPIInspectTimer: ReturnType<typeof setTimeout> | null = null
 
 const envDraft = reactive({
   id: '',
@@ -168,6 +185,8 @@ const activeModalTitle = computed(() => {
       return t.value.importCurlRequest
     case 'openapi':
       return t.value.importOpenAPICollection
+    case 'har':
+      return t.value.importHARCollection
     case 'postman':
       return t.value.importPostmanCollection
     case 'export':
@@ -191,12 +210,16 @@ const {
   runnerQueue,
   runnerFailurePolicy,
   runnerStopRequested,
+  runnerRetryCount,
+  runnerDelayMs,
   ensureRunnerRequest,
   setRunnerRequest,
   selectRunnerRequest,
   setRunnerScope,
   setRunnerIterations,
   setRunnerFailurePolicy,
+  setRunnerRetryCount,
+  setRunnerDelayMs,
   stopRunner,
   runActiveCollection,
   runRunnerRequest,
@@ -210,7 +233,8 @@ const {
   saveRequest: SaveRequest,
   sendRequest: SendRequest,
   getState: GetState,
-  setState
+  setState,
+  saveRunnerResult: SaveRunnerResult
 })
 
 const filteredRequests = computed(() => {
@@ -255,6 +279,8 @@ const requestTabs = computed(() => [
   { key: 'body' as RequestTab, label: t.value.body, count: activeRequest.value?.bodyMode && activeRequest.value.bodyMode !== 'none' ? 1 : 0 },
   { key: 'pre' as RequestTab, label: t.value.pre, count: activeRequest.value?.preScript?.trim() ? 1 : 0 },
   { key: 'tests' as RequestTab, label: t.value.tests, count: activeRequest.value?.testScript?.trim() ? 1 : 0 },
+  { key: 'preview' as RequestTab, label: t.value.actualRequest, count: requestPreview.value?.url ? 1 : 0 },
+  { key: 'variables' as RequestTab, label: t.value.variableDebug, count: variableDebugReport.value?.errors?.length ?? 0 },
   { key: 'settings' as RequestTab, label: t.value.settings, count: activeRequest.value?.timeoutMs ? 1 : 0 }
 ])
 
@@ -366,6 +392,11 @@ watch(activeRequest, () => {
   scheduleRequestAutosave()
 }, { deep: true })
 
+watch(activeRequestTab, (tab) => {
+  if (tab === 'preview') void refreshRequestPreview()
+  if (tab === 'variables') void refreshVariableDebug()
+})
+
 watch(envDraft, () => {
   if (environmentPanel.value === 'environment') scheduleEnvironmentAutosave()
 }, { deep: true })
@@ -377,6 +408,12 @@ watch(globalsDraft, () => {
 watch(settingsDraft, () => {
   scheduleSettingsAutosave()
 }, { deep: true })
+
+watch(openAPIText, () => {
+  if (activeModal.value !== 'openapi') return
+  if (openAPIInspectTimer) clearTimeout(openAPIInspectTimer)
+  openAPIInspectTimer = setTimeout(() => { void inspectOpenAPIText() }, 350)
+})
 
 watch(activeNav, (_next, previous) => {
   if (previous === 'collections') void flushRequestAutosave()
@@ -888,6 +925,7 @@ async function sendActiveRequest() {
     setState(savedState)
     const result = await SendRequest(requestToSend, activeEnvironment.value?.id ?? '', globalsDraft.value)
     response.value = result
+    requestPreview.value = result.request || requestPreview.value
     if (result.contentType && result.body) {
       result.body = await FormatBody(result.contentType, result.body)
     }
@@ -899,6 +937,47 @@ async function sendActiveRequest() {
   } finally {
     busy.value = false
   }
+}
+
+async function refreshRequestPreview() {
+  if (!activeRequest.value) {
+    requestPreview.value = null
+    return
+  }
+  requestPreviewBusy.value = true
+  try {
+    const requestToPreview = normalizeRequest(cloneRequest(activeRequest.value))
+    syncFormBody(requestToPreview)
+    requestPreview.value = await PreviewRequest(requestToPreview, activeEnvironment.value?.id ?? '', globalsDraft.value)
+  } catch (error) {
+    requestPreview.value = new domain.PreparedRequest({ error: formatError(error) })
+  } finally {
+    requestPreviewBusy.value = false
+  }
+}
+
+async function refreshVariableDebug() {
+  variableDebugBusy.value = true
+  try {
+    const requestToDebug = activeRequest.value ? normalizeRequest(cloneRequest(activeRequest.value)) : new domain.Request()
+    if (activeRequest.value) syncFormBody(requestToDebug)
+    variableDebugReport.value = await DebugRequestVariables(requestToDebug, activeEnvironment.value?.id ?? '', globalsDraft.value)
+  } catch (error) {
+    variableDebugReport.value = new domain.VariableDebugReport({ variables: [], errors: [formatError(error)] })
+  } finally {
+    variableDebugBusy.value = false
+  }
+}
+
+async function testEnvironmentJSONPathVariable(variable: domain.KeyValue) {
+  if (!envDraft.id) throw new Error(t.value.environmentName)
+  const variableToTest = new domain.KeyValue({
+    ...variable,
+    key: variable.key?.trim() || `__jsonpath_${variable.id || crypto.randomUUID()}`,
+    enabled: true,
+    valueType: 'responseJsonPath'
+  })
+  return TestVariable(variableToTest, envDraft.id, globalsDraft.value)
 }
 
 async function importPostmanCollection() {
@@ -923,11 +1002,48 @@ async function importOpenAPICollection() {
   await flushRequestAutosave()
   busy.value = true
   try {
-    const next = await ImportOpenAPICollection(openAPIText.value)
+    const next = selectedOpenAPIServer.value
+      ? await ImportOpenAPICollectionWithOptions(openAPIText.value, new domain.OpenAPIImportOptions({ serverUrl: selectedOpenAPIServer.value }))
+      : await ImportOpenAPICollection(openAPIText.value)
     setState(next)
     activeModal.value = null
     openAPIText.value = ''
+    openAPIServers.value = []
+    selectedOpenAPIServer.value = ''
     statusMessage.value = t.value.openAPIImported
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function inspectOpenAPIText() {
+  if (!openAPIText.value.trim()) {
+    openAPIServers.value = []
+    selectedOpenAPIServer.value = ''
+    return
+  }
+  try {
+    const info = await InspectOpenAPI(openAPIText.value)
+    openAPIServers.value = info.servers ?? []
+    if (!selectedOpenAPIServer.value) selectedOpenAPIServer.value = openAPIServers.value[0] ?? ''
+  } catch {
+    openAPIServers.value = []
+    selectedOpenAPIServer.value = ''
+  }
+}
+
+async function importHARCollection() {
+  if (!harText.value.trim()) return
+  await flushRequestAutosave()
+  busy.value = true
+  try {
+    const next = await ImportHARCollection(harText.value)
+    setState(next)
+    activeModal.value = null
+    harText.value = ''
+    statusMessage.value = t.value.harImported
   } catch (error) {
     statusMessage.value = formatError(error)
   } finally {
@@ -996,7 +1112,15 @@ function openOpenAPIModal() {
     servers: [{ url: '{{baseUrl}}' }],
     paths: {}
   }, null, 2)
+  openAPIServers.value = ['{{baseUrl}}']
+  selectedOpenAPIServer.value = '{{baseUrl}}'
   activeModal.value = 'openapi'
+}
+
+function openHARModal() {
+  closeCollectionMenus()
+  harText.value = JSON.stringify({ log: { version: '1.2', creator: { name: 'Browser', version: '1' }, entries: [] } }, null, 2)
+  activeModal.value = 'har'
 }
 
 function openFetchModal() {
@@ -1024,6 +1148,7 @@ function closeModal() {
 function submitActiveModal() {
   if (activeModal.value === 'postman') return importPostmanCollection()
   if (activeModal.value === 'openapi') return importOpenAPICollection()
+  if (activeModal.value === 'har') return importHARCollection()
   if (activeModal.value === 'fetch') return importFetchRequest()
   if (activeModal.value === 'curl') return importCurlRequest()
 }
@@ -1051,6 +1176,20 @@ async function exportOpenAPICollection() {
     activeModal.value = 'export'
     closeCollectionMenus()
     statusMessage.value = t.value.openAPIExported
+  } catch (error) {
+    statusMessage.value = formatError(error)
+  }
+}
+
+async function exportHARCollection() {
+  const collection = activeCollection.value
+  if (!collection) return
+  await flushRequestAutosave()
+  try {
+    exportText.value = await ExportHARCollection(collection.id)
+    activeModal.value = 'export'
+    closeCollectionMenus()
+    statusMessage.value = t.value.harExported
   } catch (error) {
     statusMessage.value = formatError(error)
   }
@@ -1486,8 +1625,10 @@ async function closeWindow() {
         @open-curl-modal="openCurlModal"
         @open-postman-modal="openPostmanModal"
         @open-open-a-p-i-modal="openOpenAPIModal"
+        @open-h-a-r-modal="openHARModal"
         @export-collection="exportCollection"
         @export-open-a-p-i-collection="exportOpenAPICollection"
+        @export-h-a-r-collection="exportHARCollection"
         @select-request="selectRequest"
         @generate-request-code="openRequestCodeModal"
         @export-request="exportRequestFromMenu"
@@ -1530,6 +1671,10 @@ async function closeWindow() {
           :auth-types="authTypes"
           :body-modes="bodyModes"
           :variable-suggestions="variableSuggestions"
+          :request-preview="requestPreview"
+          :request-preview-busy="requestPreviewBusy"
+          :variable-debug-report="variableDebugReport"
+          :variable-debug-busy="variableDebugBusy"
           :send-request-action="sendActiveRequest"
           @create-request="createRequest"
           @add-param="addParam"
@@ -1543,6 +1688,8 @@ async function closeWindow() {
           @copy-response-value="copyResponseValue"
           @save-response="saveResponseBody"
           @create-response-variable="createResponseVariable"
+          @refresh-request-preview="refreshRequestPreview"
+          @refresh-variable-debug="refreshVariableDebug"
         />
 
         <EnvironmentsView
@@ -1553,6 +1700,7 @@ async function closeWindow() {
           :mode="environmentPanel"
           :collections="state?.collections ?? []"
           :variable-suggestions="variableSuggestions"
+          :test-json-path="testEnvironmentJSONPathVariable"
           @add-variable="addVariable"
           @remove-row="removeRow"
         />
@@ -1578,11 +1726,16 @@ async function closeWindow() {
           :runner-queue="runnerQueue"
           :runner-busy="runnerBusy"
           :runner-failure-policy="runnerFailurePolicy"
+          :runner-retry-count="runnerRetryCount"
+          :runner-delay-ms="runnerDelayMs"
+          :runner-history="state?.runnerHistory ?? []"
           @select-collection="selectCollectionById"
           @select-request="selectRunnerRequest"
           @set-scope="setRunnerScope"
           @set-iterations="setRunnerIterations"
           @set-failure-policy="setRunnerFailurePolicy"
+          @set-retry-count="setRunnerRetryCount"
+          @set-delay-ms="setRunnerDelayMs"
           @run-collection="runActiveCollection"
           @run-request="runRunnerRequest"
           @stop-run="stopRunner"
@@ -1623,6 +1776,8 @@ async function closeWindow() {
   <ImportModal
     v-model:postman-text="postmanText"
     v-model:open-a-p-i-text="openAPIText"
+    v-model:har-text="harText"
+    v-model:selected-open-a-p-i-server="selectedOpenAPIServer"
     v-model:fetch-text="fetchText"
     v-model:curl-text="curlText"
     :active-modal="activeModal"
@@ -1630,6 +1785,7 @@ async function closeWindow() {
     :busy="busy"
     :t="t"
     :export-text="exportText"
+    :open-a-p-i-servers="openAPIServers"
     @close="closeModal"
     @submit="submitActiveModal"
   />

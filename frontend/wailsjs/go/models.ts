@@ -324,6 +324,96 @@ export namespace domain {
 	}
 	
 	
+	export class PreparedBody {
+	    mode: string;
+	    contentType: string;
+	    text: string;
+	    formItems: FormItem[];
+	    sizeBytes: number;
+	    truncated: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PreparedBody(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.contentType = source["contentType"];
+	        this.text = source["text"];
+	        this.formItems = this.convertValues(source["formItems"], FormItem);
+	        this.sizeBytes = source["sizeBytes"];
+	        this.truncated = source["truncated"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PreparedRequest {
+	    method: string;
+	    url: string;
+	    headers: KeyValue[];
+	    cookies: Cookie[];
+	    body: PreparedBody;
+	    proxy: ProxyConfig;
+	    proxyApplied: boolean;
+	    proxyExcluded: boolean;
+	    proxySource: string;
+	    variableErrors: string[];
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PreparedRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.method = source["method"];
+	        this.url = source["url"];
+	        this.headers = this.convertValues(source["headers"], KeyValue);
+	        this.cookies = this.convertValues(source["cookies"], Cookie);
+	        this.body = this.convertValues(source["body"], PreparedBody);
+	        this.proxy = this.convertValues(source["proxy"], ProxyConfig);
+	        this.proxyApplied = source["proxyApplied"];
+	        this.proxyExcluded = source["proxyExcluded"];
+	        this.proxySource = source["proxySource"];
+	        this.variableErrors = source["variableErrors"];
+	        this.error = source["error"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class TestResult {
 	    name: string;
 	    passed: boolean;
@@ -352,6 +442,7 @@ export namespace domain {
 	    testResults: TestResult[];
 	    error: string;
 	    requestedUrl: string;
+	    request: PreparedRequest;
 	
 	    static createFrom(source: any = {}) {
 	        return new Response(source);
@@ -370,6 +461,7 @@ export namespace domain {
 	        this.testResults = this.convertValues(source["testResults"], TestResult);
 	        this.error = source["error"];
 	        this.requestedUrl = source["requestedUrl"];
+	        this.request = this.convertValues(source["request"], PreparedRequest);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -440,9 +532,99 @@ export namespace domain {
 		}
 	}
 	
+	export class OpenAPIImportOptions {
+	    serverUrl: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new OpenAPIImportOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.serverUrl = source["serverUrl"];
+	    }
+	}
+	export class OpenAPIInfo {
+	    title: string;
+	    description: string;
+	    servers: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new OpenAPIInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.servers = source["servers"];
+	    }
+	}
 	
 	
 	
+	
+	
+	export class RunnerRequestResult {
+	    id: string;
+	    requestId: string;
+	    iteration: number;
+	    name: string;
+	    method: string;
+	    url: string;
+	    status: string;
+	    statusCode: number;
+	    durationMs: number;
+	    message: string;
+	    request: PreparedRequest;
+	    response: Response;
+	    testResults: TestResult[];
+	    // Go type: time
+	    startedAt: any;
+	    // Go type: time
+	    finishedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new RunnerRequestResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.requestId = source["requestId"];
+	        this.iteration = source["iteration"];
+	        this.name = source["name"];
+	        this.method = source["method"];
+	        this.url = source["url"];
+	        this.status = source["status"];
+	        this.statusCode = source["statusCode"];
+	        this.durationMs = source["durationMs"];
+	        this.message = source["message"];
+	        this.request = this.convertValues(source["request"], PreparedRequest);
+	        this.response = this.convertValues(source["response"], Response);
+	        this.testResults = this.convertValues(source["testResults"], TestResult);
+	        this.startedAt = this.convertValues(source["startedAt"], null);
+	        this.finishedAt = this.convertValues(source["finishedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class RunnerResult {
 	    id: string;
 	    collectionId: string;
@@ -453,6 +635,7 @@ export namespace domain {
 	    failed: number;
 	    durationMs: number;
 	    items: TestResult[];
+	    details: RunnerRequestResult[];
 	    // Go type: time
 	    createdAt: any;
 	
@@ -471,6 +654,7 @@ export namespace domain {
 	        this.failed = source["failed"];
 	        this.durationMs = source["durationMs"];
 	        this.items = this.convertValues(source["items"], TestResult);
+	        this.details = this.convertValues(source["details"], RunnerRequestResult);
 	        this.createdAt = this.convertValues(source["createdAt"], null);
 	    }
 	
@@ -527,10 +711,67 @@ export namespace domain {
 		}
 	}
 	
+	export class VariableDebugItem {
+	    name: string;
+	    source: string;
+	    type: string;
+	    raw: string;
+	    value: string;
+	    resolved: boolean;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new VariableDebugItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.source = source["source"];
+	        this.type = source["type"];
+	        this.raw = source["raw"];
+	        this.value = source["value"];
+	        this.resolved = source["resolved"];
+	        this.error = source["error"];
+	    }
+	}
+	export class VariableDebugReport {
+	    variables: VariableDebugItem[];
+	    errors: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new VariableDebugReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.variables = this.convertValues(source["variables"], VariableDebugItem);
+	        this.errors = source["errors"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class WorkspaceState {
 	    collections: Collection[];
 	    environments: Environment[];
 	    history: HistoryItem[];
+	    runnerHistory: RunnerResult[];
 	    globals: KeyValue[];
 	    cookies: Cookie[];
 	    activeEnvironmentId: string;
@@ -545,6 +786,7 @@ export namespace domain {
 	        this.collections = this.convertValues(source["collections"], Collection);
 	        this.environments = this.convertValues(source["environments"], Environment);
 	        this.history = this.convertValues(source["history"], HistoryItem);
+	        this.runnerHistory = this.convertValues(source["runnerHistory"], RunnerResult);
 	        this.globals = this.convertValues(source["globals"], KeyValue);
 	        this.cookies = this.convertValues(source["cookies"], Cookie);
 	        this.activeEnvironmentId = source["activeEnvironmentId"];

@@ -18,6 +18,14 @@ export function CreateResponseVariable(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['CreateResponseVariable'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function DebugRequestVariables(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DebugRequestVariables'](arg1, arg2, arg3);
+}
+
+export function DebugVariables(arg1, arg2) {
+  return window['go']['main']['App']['DebugVariables'](arg1, arg2);
+}
+
 export function DeleteCollection(arg1) {
   return window['go']['main']['App']['DeleteCollection'](arg1);
 }
@@ -32,6 +40,10 @@ export function DeleteEnvironment(arg1) {
 
 export function DeleteRequest(arg1) {
   return window['go']['main']['App']['DeleteRequest'](arg1);
+}
+
+export function ExportHARCollection(arg1) {
+  return window['go']['main']['App']['ExportHARCollection'](arg1);
 }
 
 export function ExportOpenAPICollection(arg1) {
@@ -62,12 +74,28 @@ export function ImportFetchRequest(arg1, arg2) {
   return window['go']['main']['App']['ImportFetchRequest'](arg1, arg2);
 }
 
+export function ImportHARCollection(arg1) {
+  return window['go']['main']['App']['ImportHARCollection'](arg1);
+}
+
 export function ImportOpenAPICollection(arg1) {
   return window['go']['main']['App']['ImportOpenAPICollection'](arg1);
 }
 
+export function ImportOpenAPICollectionWithOptions(arg1, arg2) {
+  return window['go']['main']['App']['ImportOpenAPICollectionWithOptions'](arg1, arg2);
+}
+
 export function ImportPostmanCollection(arg1) {
   return window['go']['main']['App']['ImportPostmanCollection'](arg1);
+}
+
+export function InspectOpenAPI(arg1) {
+  return window['go']['main']['App']['InspectOpenAPI'](arg1);
+}
+
+export function PreviewRequest(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PreviewRequest'](arg1, arg2, arg3);
 }
 
 export function QueryJSONPath(arg1, arg2) {
@@ -94,6 +122,10 @@ export function SaveRequest(arg1) {
   return window['go']['main']['App']['SaveRequest'](arg1);
 }
 
+export function SaveRunnerResult(arg1) {
+  return window['go']['main']['App']['SaveRunnerResult'](arg1);
+}
+
 export function SaveSettings(arg1) {
   return window['go']['main']['App']['SaveSettings'](arg1);
 }
@@ -116,6 +148,10 @@ export function SetActiveEnvironment(arg1) {
 
 export function TestSSE(arg1, arg2, arg3) {
   return window['go']['main']['App']['TestSSE'](arg1, arg2, arg3);
+}
+
+export function TestVariable(arg1, arg2, arg3) {
+  return window['go']['main']['App']['TestVariable'](arg1, arg2, arg3);
 }
 
 export function TestWebSocket(arg1, arg2, arg3) {

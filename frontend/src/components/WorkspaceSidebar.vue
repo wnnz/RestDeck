@@ -41,8 +41,10 @@ const emit = defineEmits<{
   openCurlModal: []
   openPostmanModal: []
   openOpenAPIModal: []
+  openHARModal: []
   exportCollection: []
   exportOpenAPICollection: []
+  exportHARCollection: []
   selectRequest: [request: domain.Request]
   generateRequestCode: [request: domain.Request]
   exportRequest: [request: domain.Request]
@@ -139,6 +141,11 @@ function openOpenAPIModal() {
   emit('openOpenAPIModal')
 }
 
+function openHARModal() {
+  closeActionMenus()
+  emit('openHARModal')
+}
+
 function exportCollection() {
   closeActionMenus()
   emit('exportCollection')
@@ -147,6 +154,11 @@ function exportCollection() {
 function exportOpenAPICollection() {
   closeActionMenus()
   emit('exportOpenAPICollection')
+}
+
+function exportHARCollection() {
+  closeActionMenus()
+  emit('exportHARCollection')
 }
 
 function openEnvironmentMenu(event: MouseEvent, environment: domain.Environment) {
@@ -334,6 +346,10 @@ function deleteEnvironment(id: string) {
                 <Import :size="14" />
                 {{ t.importFromOpenAPI }}
               </VoltButton>
+              <VoltButton variant="ghost" @click="openHARModal">
+                <Import :size="14" />
+                {{ t.importFromHAR }}
+              </VoltButton>
               <VoltButton variant="ghost" @click="openFetchModal">
                 <Import :size="14" />
                 {{ t.importFromFetch }}
@@ -349,6 +365,10 @@ function deleteEnvironment(id: string) {
               <VoltButton variant="ghost" :disabled="!activeCollection" @click="exportOpenAPICollection">
                 <Download :size="14" />
                 OpenAPI {{ t.export }}
+              </VoltButton>
+              <VoltButton variant="ghost" :disabled="!activeCollection" @click="exportHARCollection">
+                <Download :size="14" />
+                HAR {{ t.export }}
               </VoltButton>
             </VoltPopover>
           </div>

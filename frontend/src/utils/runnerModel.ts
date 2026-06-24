@@ -12,6 +12,7 @@ export function newRunnerResult(input: { collectionId: string; environmentId: st
     failed: 0,
     durationMs: 0,
     items: [],
+    details: [],
     createdAt: new Date().toISOString()
   })
 }
